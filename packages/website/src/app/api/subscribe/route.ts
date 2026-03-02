@@ -1,19 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-/**
- * POST /api/subscribe
- *
- * Adds an email to the newsletter.
- *
- * Integration options:
- *  - Set RESEND_API_KEY + RESEND_AUDIENCE_ID → uses Resend Contacts API
- *  - No env vars → logs to console (dev mode)
- *
- * To enable Resend:
- *   1. Create account at resend.com (free tier: 3k emails/mo)
- *   2. Create an audience in the Resend dashboard
- *   3. Set RESEND_API_KEY and RESEND_AUDIENCE_ID in .env
- */
 export async function POST(req: NextRequest) {
   let body: unknown;
   try {
@@ -30,30 +16,32 @@ export async function POST(req: NextRequest) {
   const resendKey = process.env.RESEND_API_KEY;
   const audienceId = process.env.RESEND_AUDIENCE_ID;
 
-  if (resendKey && audienceId) {
-    // Real Resend integration
-    const res = await fetch(`https://api.resend.com/audiences/${audienceId}/contacts`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        unsubscribed: false,
-      }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      console.error('[subscribe] Resend error:', data);
-      return NextResponse.json({ error: 'Failed to subscribe' }, { status: 500 });
-    }
-
+  if (!resendKey || !audienceId) {
+    // No keys configured — dev/no-op mode
+    console.log(`[subscribe] No Resend config. Would have subscribed: ${email}`);
     return NextResponse.json({ ok: true });
   }
 
-  // No API key configured — log and return success (dev/no-op mode)
-  console.log(`[subscribe] New subscriber (no Resend key configured): ${email}`);
+  const res = await fetch(`https://api.resend.com/audiences/${audienceId}/contacts`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, unsubscribed: false }),
+  });
+
+  // Contact already exists — treat as success
+  if (res.status === 409) {
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const message = (data?.message as string) ?? (data?.name as string) ?? `Resend ${res.status}`;
+    console.error('[subscribe] Resend error:', res.status, data);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   return NextResponse.json({ ok: true });
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import {
   RocketIcon, LayersIcon, RouteIcon, GitForkIcon, CpuIcon, RefreshIcon,
   ListChecksIcon, LockIcon, PuzzleIcon, PlugIcon, WrenchIcon, ShipIcon,
@@ -11,13 +12,11 @@ export const metadata: Metadata = {
   description: 'Complete documentation for the Arvis AI agent platform.',
 };
 
-const GITHUB_DOCS = 'https://github.com/Arvis-agent/arvis/blob/main/docs';
-
 const DOCS: {
   num: string;
   title: string;
   desc: string;
-  href: string;
+  slug: string;
   icon: ReactNode;
   tag?: string;
   tagColor?: string;
@@ -26,7 +25,7 @@ const DOCS: {
     num: '00',
     title: 'User guide',
     desc: 'Getting started, connecting platforms, creating agents.',
-    href: `${GITHUB_DOCS}/00-user-guide.md`,
+    slug: '00-user-guide',
     icon: <RocketIcon size={20} />,
     tag: 'Start here',
     tagColor: '#8B5CF6',
@@ -35,77 +34,77 @@ const DOCS: {
     num: '01',
     title: 'Architecture',
     desc: 'System overview — every process, port, and module.',
-    href: `${GITHUB_DOCS}/01-architecture.md`,
+    slug: '01-architecture',
     icon: <LayersIcon size={20} />,
   },
   {
     num: '02',
     title: 'Message flow',
     desc: 'Complete step-by-step: user message → LLM → response.',
-    href: `${GITHUB_DOCS}/02-message-flow.md`,
+    slug: '02-message-flow',
     icon: <RouteIcon size={20} />,
   },
   {
     num: '03',
     title: 'Routing',
     desc: 'How messages are assigned to the right agent.',
-    href: `${GITHUB_DOCS}/03-routing.md`,
+    slug: '03-routing',
     icon: <GitForkIcon size={20} />,
   },
   {
     num: '04',
     title: 'LLM providers',
     desc: 'Accounts, failover, multiple providers, CLI vs API.',
-    href: `${GITHUB_DOCS}/04-llm-providers.md`,
+    slug: '04-llm-providers',
     icon: <CpuIcon size={20} />,
   },
   {
     num: '05',
     title: 'Context & memory',
     desc: 'How context is built, memory system, auto-compaction.',
-    href: `${GITHUB_DOCS}/05-context-memory.md`,
+    slug: '05-context-memory',
     icon: <RefreshIcon size={20} />,
   },
   {
     num: '06',
     title: 'Queue & scheduler',
     desc: 'Job queue, priorities, retries, scheduled tasks.',
-    href: `${GITHUB_DOCS}/06-queue-scheduler.md`,
+    slug: '06-queue-scheduler',
     icon: <ListChecksIcon size={20} />,
   },
   {
     num: '07',
     title: 'Security',
     desc: 'Auth, VPS setup, API keys, Docker sandbox, credentials.',
-    href: `${GITHUB_DOCS}/07-security.md`,
+    slug: '07-security',
     icon: <LockIcon size={20} />,
   },
   {
     num: '08',
     title: 'Extensibility',
     desc: 'Custom tools, skills, connectors, plugins.',
-    href: `${GITHUB_DOCS}/08-extensibility.md`,
+    slug: '08-extensibility',
     icon: <PuzzleIcon size={20} />,
   },
   {
     num: '09',
     title: 'Connectors',
     desc: 'Platform-specific docs: Discord, Telegram, Slack, WhatsApp, SMS, Email, Web.',
-    href: `${GITHUB_DOCS}/09-connectors.md`,
+    slug: '09-connectors',
     icon: <PlugIcon size={20} />,
   },
   {
     num: '10',
     title: 'Troubleshooting',
     desc: 'What to check when things break. SQL debug queries.',
-    href: `${GITHUB_DOCS}/10-troubleshooting.md`,
+    slug: '10-troubleshooting',
     icon: <WrenchIcon size={20} />,
   },
   {
     num: '11',
     title: 'Deployment',
     desc: 'Docker, VPS bare metal, systemd, nginx, backups.',
-    href: `${GITHUB_DOCS}/11-deployment.md`,
+    slug: '11-deployment',
     icon: <ShipIcon size={20} />,
     tag: 'VPS guide',
     tagColor: '#f59e0b',
@@ -114,7 +113,7 @@ const DOCS: {
     num: '12',
     title: 'API reference',
     desc: 'Complete REST API reference — all endpoints, auth, responses.',
-    href: `${GITHUB_DOCS}/12-api-reference.md`,
+    slug: '12-api-reference',
     icon: <ApiIcon size={20} />,
     tag: 'API',
     tagColor: '#22c55e',
@@ -176,10 +175,8 @@ export default function DocsPage() {
             <GithubIcon size={16} />
             View on GitHub
           </a>
-          <a
-            href={`${GITHUB_DOCS}/00-user-guide.md`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/docs/00-user-guide"
             style={{
               background: 'transparent',
               color: '#e4e4e7',
@@ -192,7 +189,7 @@ export default function DocsPage() {
             }}
           >
             Quick start →
-          </a>
+          </Link>
         </div>
       </div>
 
@@ -206,11 +203,9 @@ export default function DocsPage() {
           }}
         >
           {DOCS.map((doc) => (
-            <a
+            <Link
               key={doc.num}
-              href={doc.href}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={`/docs/${doc.slug}`}
               className="card-hover"
               style={{
                 display: 'block',
@@ -254,7 +249,7 @@ export default function DocsPage() {
               </div>
               <h3 style={{ fontSize: 15, fontWeight: 700, color: '#e4e4e7', marginBottom: 6 }}>{doc.title}</h3>
               <p style={{ fontSize: 13, color: '#63636e', lineHeight: 1.6 }}>{doc.desc}</p>
-            </a>
+            </Link>
           ))}
         </div>
 
