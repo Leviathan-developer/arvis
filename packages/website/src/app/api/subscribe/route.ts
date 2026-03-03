@@ -1,46 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Redis } from '@upstash/redis';
+import { Ratelimit } from '@upstash/ratelimit';
+
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
+
+// 5 requests per minute per IP
+const ratelimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(5, '1 m'),
+  analytics: true,
+});
 
 export async function POST(req: NextRequest) {
-  let body: unknown;
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    // Get client IP
+    const forwardedFor = req.headers.get('x-forwarded-for');
+    const ip = forwardedFor?.split(',')[0] ?? 'anonymous';
+
+    // Apply rate limit
+    const { success, reset } = await ratelimit.limit(ip);
+
+    if (!success) {
+      return NextResponse.json(
+        {
+          error: 'Too many requests. Please try again later.',
+        },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.ceil((reset - Date.now()) / 1000)),
+          },
+        }
+      );
+    }
+
+    const { email } = await req.json();
+
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return NextResponse.json(
+        { error: 'Invalid email address.' },
+        { status: 400 }
+      );
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+
+    return NextResponse.json(
+      { success: true },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error('Subscribe error:', error);
+
+    return NextResponse.json(
+      { error: 'Something went wrong.' },
+      { status: 500 }
+    );
   }
-
-  const email = (body as Record<string, unknown>)?.email;
-  if (typeof email !== 'string' || !email.includes('@')) {
-    return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
-  }
-
-  const resendKey = process.env.RESEND_API_KEY;
-
-  if (!resendKey) {
-    console.log(`[subscribe] No RESEND_API_KEY. Would have subscribed: ${email}`);
-    return NextResponse.json({ ok: true });
-  }
-
-  // POST /contacts — Resend Contacts API (no audience ID needed)
-  const res = await fetch('https://api.resend.com/contacts', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, unsubscribed: false }),
-  });
-
-  // Already subscribed — treat as success
-  if (res.status === 409) {
-    return NextResponse.json({ ok: true });
-  }
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
-    const message = (data?.message as string) ?? (data?.name as string) ?? `Resend ${res.status}`;
-    console.error('[subscribe] Resend error:', res.status, data);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true });
 }
