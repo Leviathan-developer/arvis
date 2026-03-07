@@ -4,6 +4,8 @@ export interface Attachment {
     url: string;
     contentType?: string;
     size?: number;
+    /** Base64-encoded binary data pre-fetched by the connector (Telegram, WhatsApp) */
+    data?: string;
 }
 export interface FileAttachment {
     name: string;
@@ -29,7 +31,7 @@ export interface Button {
 }
 export interface IncomingMessage {
     id: string;
-    platform: 'discord' | 'telegram' | 'slack' | 'whatsapp' | 'matrix' | 'web' | 'system';
+    platform: 'discord' | 'telegram' | 'slack' | 'whatsapp' | 'matrix' | 'web' | 'sms' | 'email' | 'system';
     channelId: string;
     userId: string;
     userName: string;

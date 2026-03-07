@@ -248,6 +248,10 @@ export class WhatsAppConnector {
                 ? new Date(Number(waMsg.timestamp) * 1000)
                 : new Date(),
             };
+            // Send read receipt for image messages
+            const imgMsgId = String(waMsg.id || '');
+            if (imgMsgId) this.sendReadReceipt(imgMsgId).catch(() => {});
+
             this.bus.emit('message', imgMsg);
             continue;
           } else if (msgType === 'document' || msgType === 'video') {
@@ -294,6 +298,12 @@ export class WhatsAppConnector {
               : new Date(),
           };
 
+          // Send read receipt (blue checkmarks)
+          const waMsgId = String(waMsg.id || '');
+          if (waMsgId) {
+            this.sendReadReceipt(waMsgId).catch(() => {});
+          }
+
           this.bus.emit('message', msg);
         }
       }
@@ -323,6 +333,29 @@ export class WhatsAppConnector {
       await this.graphApiRequest(url, payload);
     }
 
+    // Send files as media messages (image, audio, video, or document)
+    if (msg.files?.length) {
+      for (const file of msg.files) {
+        const buffer = typeof file.data === 'string' ? Buffer.from(file.data, 'base64') : file.data;
+        const ct = file.contentType || 'application/octet-stream';
+        const mediaId = await this.uploadMedia(buffer, ct, file.name);
+        if (!mediaId) continue;
+        const mediaType = ct.startsWith('image/') ? 'image'
+          : ct.startsWith('audio/') ? 'audio'
+          : ct.startsWith('video/') ? 'video'
+          : 'document';
+        await this.graphApiRequest(url, {
+          messaging_product: 'whatsapp',
+          to: msg.channelId,
+          type: mediaType,
+          [mediaType]: {
+            id: mediaId,
+            ...(mediaType === 'document' ? { filename: file.name } : {}),
+          },
+        });
+      }
+    }
+
     // Send buttons as interactive message (WhatsApp supports max 3 buttons)
     if (msg.buttons?.length) {
       const buttons = msg.buttons.slice(0, 3).map(btn => ({
@@ -344,6 +377,36 @@ export class WhatsAppConnector {
         },
       });
     }
+  }
+
+  /** Upload media to WhatsApp and get a media ID for sending */
+  private async uploadMedia(buffer: Buffer, contentType: string, filename: string): Promise<string | null> {
+    try {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(buffer)], { type: contentType }), filename);
+      form.append('messaging_product', 'whatsapp');
+      form.append('type', contentType);
+      const res = await fetch(`${GRAPH_API}/${this.config.phoneNumberId}/media`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.config.accessToken}` },
+        body: form,
+      });
+      if (!res.ok) return null;
+      const data = await res.json() as { id?: string };
+      return data.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Send read receipt (blue checkmarks) to WhatsApp */
+  private async sendReadReceipt(messageId: string): Promise<void> {
+    const url = `${GRAPH_API}/${this.config.phoneNumberId}/messages`;
+    await this.graphApiRequest(url, {
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+    });
   }
 
   /** Get download URL for a WhatsApp media object */

@@ -8,6 +8,8 @@ export class QueueManager {
     db;
     running = false;
     interval = null;
+    recoveryInterval = null;
+    concurrency = 1;
     activeJobs = 0;
     onProcess;
     constructor(db) {
@@ -23,6 +25,10 @@ export class QueueManager {
        VALUES (?, ?, ?, ?)`, job.agentId, job.type, JSON.stringify(job.payload), job.priority ?? 5);
         const id = Number(result.lastInsertRowid);
         log.debug({ jobId: id, type: job.type, priority: job.priority ?? 5 }, 'Job enqueued');
+        // Immediately kick off processing instead of waiting for the next poll tick
+        if (this.running && this.activeJobs < this.concurrency) {
+            setImmediate(() => this.processNext().catch(() => { }));
+        }
         return id;
     }
     /** Process the next pending job */
@@ -70,12 +76,35 @@ export class QueueManager {
             this.activeJobs--;
         }
     }
+    /**
+     * Mark jobs stuck in 'running' for more than 5 minutes as failed.
+     * Guards against process crashes that leave jobs orphaned in running state.
+     */
+    recoverStuckJobs() {
+        const result = this.db.run(`UPDATE queue
+       SET status = 'failed',
+           error = 'Job timed out — process likely crashed',
+           completed_at = datetime('now')
+       WHERE status = 'running'
+         AND started_at < datetime('now', '-5 minutes')`);
+        const recovered = result.changes ?? 0;
+        if (recovered > 0) {
+            log.warn({ recovered }, 'Recovered stuck jobs');
+        }
+    }
     /** Start the processing loop */
     start(intervalMs = 1000, concurrency = 1) {
         if (this.running)
             return;
         this.running = true;
+        this.concurrency = concurrency;
         log.info({ intervalMs, concurrency }, 'Queue processor started');
+        // Recover any jobs stuck in 'running' from a previous crashed process
+        this.recoverStuckJobs();
+        // Run recovery check every 5 minutes
+        const recoveryInterval = setInterval(() => {
+            this.recoverStuckJobs();
+        }, 5 * 60_000);
         this.interval = setInterval(async () => {
             if (this.activeJobs >= concurrency)
                 return;
@@ -86,12 +115,17 @@ export class QueueManager {
                 log.error({ err }, 'Queue processing error');
             }
         }, intervalMs);
+        this.recoveryInterval = recoveryInterval;
     }
     /** Stop the processing loop */
     stop() {
         if (this.interval) {
             clearInterval(this.interval);
             this.interval = null;
+        }
+        if (this.recoveryInterval) {
+            clearInterval(this.recoveryInterval);
+            this.recoveryInterval = null;
         }
         this.running = false;
         log.info('Queue processor stopped');
@@ -135,12 +169,20 @@ export class QueueManager {
         return row ? this.hydrateJob(row) : undefined;
     }
     hydrateJob(row) {
+        let payload;
+        try {
+            payload = JSON.parse(row.payload);
+        }
+        catch {
+            log.error({ jobId: row.id, raw: row.payload }, 'Corrupt job payload — using empty object');
+            payload = {};
+        }
         return {
             id: row.id,
             agentId: row.agent_id,
             priority: row.priority,
             type: row.type,
-            payload: JSON.parse(row.payload),
+            payload,
             status: row.status,
             accountId: row.account_id,
             result: row.result,

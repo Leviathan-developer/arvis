@@ -100,20 +100,20 @@ export class MemoryManager {
         }
         // Phase 2: Fuzzy similarity dedup (normalized string comparison)
         const allFacts = this.db.all('SELECT * FROM memory_facts WHERE agent_id = ? ORDER BY confidence DESC, id ASC', agentId);
-        const toDelete = [];
+        const toDelete = new Set();
         const kept = new Set();
         for (let i = 0; i < allFacts.length; i++) {
-            if (toDelete.includes(allFacts[i].id))
+            if (toDelete.has(allFacts[i].id))
                 continue;
             kept.add(allFacts[i].id);
             const normA = normalize(allFacts[i].content);
             for (let j = i + 1; j < allFacts.length; j++) {
-                if (toDelete.includes(allFacts[j].id))
+                if (toDelete.has(allFacts[j].id))
                     continue;
                 const normB = normalize(allFacts[j].content);
-                // If normalized strings match, or Levenshtein distance < 10% of longer string
+                // If normalized strings match, or Levenshtein distance < 15% of longer string
                 if (normA === normB || isSimilar(normA, normB)) {
-                    toDelete.push(allFacts[j].id);
+                    toDelete.add(allFacts[j].id);
                 }
             }
         }

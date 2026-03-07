@@ -28,7 +28,13 @@ export interface Account {
 export class AccountManager {
   private retryCounts = new Map<number, number>();
 
-  constructor(private db: ArvisDatabase) {}
+  constructor(private db: ArvisDatabase) {
+    // Seed in-memory retry counts from DB so backoff survives restarts
+    const rows = db.all<{ id: number; retry_count: number }>(
+      'SELECT id, retry_count FROM accounts WHERE retry_count > 0',
+    );
+    for (const r of rows) this.retryCounts.set(r.id, r.retry_count);
+  }
 
   /** Get an available account for the given mode */
   getAvailable(mode: 'fast' | 'full'): Account | null {
@@ -123,8 +129,8 @@ export class AccountManager {
     const effectiveRetry = retryAfter && retryAfter > backoffDate ? retryAfter : backoffDate;
 
     this.db.run(
-      "UPDATE accounts SET status = 'rate_limited', rate_limited_until = ? WHERE id = ?",
-      effectiveRetry.toISOString(), accountId,
+      "UPDATE accounts SET status = 'rate_limited', rate_limited_until = ?, retry_count = ? WHERE id = ?",
+      effectiveRetry.toISOString(), count, accountId,
     );
     log.info({ accountId, retryAfter: effectiveRetry, attempt: count, backoffMinutes }, 'Account temporarily limited, will auto-recover');
   }
@@ -180,10 +186,12 @@ export class AccountManager {
         );
         log.info({ name: acct.name, type: acct.type, provider: acct.provider || 'anthropic' }, 'Account synced from config');
       } else {
-        // Update home_dir and model from config so credential rotations take effect on restart
+        // Update all fields from config so credential rotations take effect on restart
         this.db.run(
-          `UPDATE accounts SET home_dir = ?, model = ?, priority = ? WHERE name = ?`,
+          `UPDATE accounts SET home_dir = ?, api_key = ?, base_url = ?, model = ?, priority = ? WHERE name = ?`,
           acct.homeDir ?? null,
+          acct.apiKey ?? existing.api_key ?? null,
+          acct.baseUrl ?? existing.base_url ?? null,
           acct.model,
           acct.priority ?? existing.priority ?? 100,
           acct.name,

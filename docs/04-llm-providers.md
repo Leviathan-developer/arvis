@@ -111,6 +111,73 @@ OPENAI_API_KEY_1=sk-backup
 
 Arvis manages all of these as a pool. When one hits a rate limit, the next one takes over instantly.
 
+**Important: Sequential numbering required.** Arvis scans `_1`, `_2`, `_3`, ... and **stops at the first gap**. If you set `_1` and `_3` but skip `_2`, only `_1` will be detected.
+
+---
+
+## Priority System
+
+Each account has a **priority number** (lower = tried first):
+
+| Provider | Base Priority | With indexing |
+|----------|--------------|---------------|
+| Claude CLI | 10 | 10, 11, 12, ... |
+| Anthropic API | 20 | 20, 21, 22, ... |
+| OpenAI | 50 | 50, 51, 52, ... |
+| OpenRouter | 60 | 60, 61, 62, ... |
+| Google Gemini | 70 | 70, 71, 72, ... |
+| Ollama (local) | 200 | 200 (single) |
+
+**Selection within same priority:** the account with the fewest total messages is used (load balancing).
+
+**Disabling an account:** In Dashboard → Settings → Accounts, toggle `isActive` to disable an account without removing it from `.env`. Disabled accounts are skipped during selection.
+
+---
+
+## Rate Limit Backoff
+
+When an account is rate-limited, it's excluded from the pool with exponential backoff:
+
+| Retry # | Cooldown |
+|---------|----------|
+| 1st | 1 minute |
+| 2nd | 5 minutes |
+| 3rd | 25 minutes |
+| 4th+ | 60 minutes (cap) |
+
+If the provider sends a `retry-after` header with a longer wait, that value is used instead.
+
+**What the user sees:** If ALL accounts are exhausted, the user receives: *"All AI accounts are rate-limited. Retrying automatically in ~X minutes."* The queue retries the job with exponential backoff (2, 4, 8 minutes).
+
+---
+
+## Mixed Provider Setup (Cost Optimization)
+
+A practical setup that minimizes cost while keeping quality high:
+
+```env
+# Primary: Claude CLI (free with subscription, priority 10)
+CLAUDE_CLI_HOME=/home/you/.claude
+
+# Backup: Anthropic API with haiku (cheap, priority 20)
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_MODEL=claude-haiku-4-5-20251001
+
+# Fallback: OpenAI mini (very cheap, priority 50)
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+
+# Last resort: Ollama local (free, priority 200)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+```
+
+With this setup:
+1. Simple messages → CLI (free)
+2. CLI rate-limited → Anthropic haiku ($0.25/MTok)
+3. Both limited → OpenAI mini ($0.15/MTok)
+4. Everything down → Ollama (free, slower)
+
 ---
 
 ## The 3-Stage Failover Chain

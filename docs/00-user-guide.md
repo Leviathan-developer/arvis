@@ -3,6 +3,97 @@
 
 ---
 
+## Installation
+
+### Prerequisites
+- **Node.js 20+** (LTS recommended)
+- **Git**
+- A text editor
+
+### Windows
+
+```powershell
+# 1. Install Node.js 20+ from https://nodejs.org (LTS)
+# 2. Install Git from https://git-scm.com/download/win
+# 3. Install build tools for native modules (better-sqlite3)
+npm install -g windows-build-tools
+# OR: Install Visual Studio Build Tools with "C++ build tools" workload
+
+# 4. Clone and install
+git clone https://github.com/Arvis-agent/arvis
+cd arvis
+npm install
+
+# 5. Configure
+copy .env.example .env
+# Edit .env with your tokens
+
+# 6. Start
+npm start
+```
+
+### macOS
+
+```bash
+# 1. Install Homebrew (if not installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 2. Install Node.js and Git
+brew install node@20 git
+
+# 3. Xcode Command Line Tools (for native modules)
+xcode-select --install
+
+# 4. Clone and install
+git clone https://github.com/Arvis-agent/arvis
+cd arvis && npm install
+
+# 5. Configure
+cp .env.example .env
+# Edit .env with your tokens
+
+# 6. Start
+npm start
+```
+
+### Linux (Ubuntu/Debian)
+
+```bash
+# 1. Install Node.js 20+ (via NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git build-essential python3
+
+# 2. Clone and install
+git clone https://github.com/Arvis-agent/arvis
+cd arvis && npm install
+
+# 3. Configure
+cp .env.example .env
+nano .env   # Add your tokens
+
+# 4. Start
+npm start
+```
+
+### Docker (Easiest for VPS)
+
+```bash
+git clone https://github.com/Arvis-agent/arvis
+cd arvis
+cp .env.example .env
+# Edit .env with your tokens
+docker-compose up -d
+# Core + dashboard start together
+```
+
+### After Installation
+
+1. Open `http://localhost:5100` (dashboard)
+2. Go to Chat → talk to the Conductor
+3. Ask it to create your first agent
+
+---
+
 ## What Is Arvis?
 
 Arvis is your personal AI agent platform. Think of it like having a team of AI assistants — each one specialized for a different job — that you can talk to through Discord, Telegram, your browser, or any messaging app.
@@ -183,7 +274,15 @@ Arvis checks: which accounts are available?
       → You still get a response, just a bit later
 ```
 
-**You never see "rate limit exceeded."** Arvis hides this completely.
+### What Happens When Rate-Limited?
+
+If ALL your accounts are rate-limited at the same time, Arvis tells you:
+
+> *"All AI accounts are rate-limited. Retrying automatically in ~2 minutes."*
+
+It retries with exponential backoff (2, 4, 8 minutes). You **will** get a response — just delayed. Once any account becomes available again, your message is processed automatically.
+
+**How to avoid this:** Add multiple accounts. Even 2 Claude CLI homes + 1 cheap API key (Anthropic haiku or OpenAI mini) means you'll almost never see this message.
 
 **Account memory:** When it switches accounts, the conversation history is rebuilt from the database. So even if account A was doing the conversation and account B takes over, it gets the full context. Nothing is lost.
 
@@ -286,6 +385,13 @@ Enable these per-agent in the Config tab:
 | `http_fetch` | Fetches a URL, strips HTML, returns text (3000 chars max) |
 | `calculate` | Safe math: `2^32`, `sqrt(144)`, `1234 * 5.67` |
 | `get_time` | Returns current date and time |
+| `get_variable` | Retrieve a stored variable/secret from the dashboard Variables settings |
+| `write_plugin` | Write an ESM plugin to plugins/ and auto-load it |
+| `list_plugins` | List all loaded plugin tools |
+| `delete_plugin` | Delete a plugin file |
+| `run_shell` | Run a shell command and capture output |
+| `read_file` | Read any file on the filesystem |
+| `write_file` | Write content to any file (creates dirs) |
 
 Enable them for an agent → they appear as available tools in the LLM prompt. The agent decides when to use them.
 
@@ -356,8 +462,23 @@ This is **fire-and-forget** — the conductor doesn't wait for results. Each sub
 - Permissions per channel: `full` or restricted
 - Each agent can only access channels it's been explicitly bound to
 
+### Tool Sandboxing
+Agents have power tools (`read_file`, `write_file`, `run_shell`, `write_plugin`) but they're sandboxed:
+- **Path validation**: `read_file` / `write_file` blocked outside the Arvis project directory. Blocks `.env`, `.sqlite`, `.ssh/`, `.pem`, `.key`, system dirs (`/etc/`, `C:\Windows\`)
+- **Shell blocklist**: `run_shell` blocks destructive commands — `rm -rf /`, `curl | bash`, `chmod 777`, `mkfs`, `shutdown`, `passwd`, fork bombs, etc.
+- **Plugin code validation**: `write_plugin` blocks `process.exit`, `child_process`, `eval()`, `new Function()` in plugin source
+- **Rate limiting**: Power tools limited to 20 calls per minute per tool (prevents runaway loops)
+- **Conductor self-protection**: Conductor cannot modify its own agent config via `[UPDATE_AGENT:conductor]`
+- **Schedule validation**: Scheduled tasks must have ≥ 30-second intervals (prevents queue flooding)
+
+### WebSocket / Web Connector Security
+- CORS restricted to localhost origins by default (configurable via `allowedOrigins`)
+- API key required for both REST and WebSocket auth when `config.apiKey` is set
+- Timing-safe comparison on all API key checks (prevents timing attacks)
+- File upload filenames sanitized via `path.basename()` + regex
+
 ### What Arvis Does NOT Have (compared to OpenClaw)
-- **No Docker sandboxing** — agents run with your user's full permissions
+- **No Docker sandboxing** — agents run with your user's permissions (but tools are sandboxed, see above)
 - **No cryptographic device identity** — simpler JWT cookie auth
 - This is intentional: Arvis is a homeserver/personal platform. You trust your own agents.
 

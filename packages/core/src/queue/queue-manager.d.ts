@@ -8,6 +8,8 @@ export declare class QueueManager {
     private db;
     private running;
     private interval;
+    private recoveryInterval;
+    private concurrency;
     activeJobs: number;
     private onProcess?;
     constructor(db: ArvisDatabase);
@@ -22,6 +24,11 @@ export declare class QueueManager {
     }): number;
     /** Process the next pending job */
     processNext(): Promise<ProcessResult | null>;
+    /**
+     * Mark jobs stuck in 'running' for more than 5 minutes as failed.
+     * Guards against process crashes that leave jobs orphaned in running state.
+     */
+    recoverStuckJobs(): void;
     /** Start the processing loop */
     start(intervalMs?: number, concurrency?: number): void;
     /** Stop the processing loop */

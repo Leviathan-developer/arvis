@@ -14,7 +14,7 @@ export declare class BillingManager {
     getClient(slug: string): Client | null;
     /** Get all clients */
     getClients(): Client[];
-    /** Record a charge */
+    /** Record a charge (charge insert + balance update are atomic) */
     recordCharge(charge: {
         clientId: number;
         agentId?: number;

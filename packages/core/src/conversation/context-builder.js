@@ -1,18 +1,26 @@
+import { estimateTokens } from '../lib/token-utils.js';
 import { createLogger } from '../logger.js';
 const log = createLogger('context-builder');
-/** Simple token estimator: ~3.5 chars per token for English text */
-function estimateTokens(text) {
-    return Math.ceil(text.length / 3.5);
-}
 /** Known model context windows (tokens) */
 const MODEL_CONTEXT_WINDOWS = {
-    'claude-sonnet-4-20250514': 200_000,
-    'claude-haiku-4-5-20251001': 200_000,
+    // Anthropic Claude 4.x
     'claude-opus-4-6': 200_000,
-    'gpt-4o': 128_000,
-    'gpt-4o-mini': 128_000,
+    'claude-sonnet-4-6': 200_000,
+    'claude-haiku-4-5-20251001': 200_000,
+    'claude-opus-4-5-20251101': 200_000,
+    'claude-sonnet-4-5-20250929': 200_000,
+    'claude-sonnet-4-20250514': 200_000,
+    'claude-opus-4-20250514': 200_000,
+    // OpenAI
     'gpt-4.1': 1_000_000,
     'gpt-4.1-mini': 1_000_000,
+    'gpt-4.1-nano': 1_000_000,
+    'gpt-4o-mini': 128_000,
+    'o3': 200_000,
+    'o4-mini': 200_000,
+    // Google Gemini
+    'gemini-2.5-pro': 1_000_000,
+    'gemini-2.5-flash': 1_000_000,
     'gemini-2.0-flash': 1_000_000,
 };
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -42,13 +50,13 @@ export class ContextBuilder {
         const contextWindow = MODEL_CONTEXT_WINDOWS[agent.model] || DEFAULT_CONTEXT_WINDOW;
         const budgetTokens = contextWindow - RESERVE_TOKENS;
         let remainingTokens = budgetTokens;
-        // --- Sticky facts (always present, never trimmed) ---
+        // --- Layer 1: Sticky facts (always present, never trimmed) ---
         const stickyFacts = this.memoryManager.getStickyFacts(agent.id);
         const stickyText = stickyFacts.length > 0
             ? stickyFacts.map(f => `- ${f.content}`).join('\n')
             : '';
         remainingTokens -= estimateTokens(stickyText);
-        // --- Layer 1: System prompt (static content first for cache friendliness) ---
+        // --- Layer 2: System prompt (static content first for cache friendliness) ---
         const facts = this.memoryManager.getFacts(agent.id, { limit: 20 });
         const state = this.getStateArray(agent.id);
         const systemPrompt = this.buildSystemPrompt(agent, facts, state, stickyFacts);
@@ -57,11 +65,11 @@ export class ContextBuilder {
         const summaries = this.conversationManager.getRecentSummaries(conversation.id, 3);
         const summaryText = this.formatSummaries(summaries);
         remainingTokens -= estimateTokens(summaryText);
-        // --- Layer 5: Facts text (for reference/debugging) ---
+        // --- Layer 4: Facts text (for reference/debugging) ---
         const factsText = this.formatFacts(facts);
-        // --- Layer 4: State text (for reference/debugging) ---
+        // --- Layer 5: State text (for reference/debugging) ---
         const stateText = this.formatState(state);
-        // --- Layer 2: Recent messages (fill remaining token budget) ---
+        // --- Layer 6: Recent messages (fill remaining token budget) ---
         const maxMessageTokens = Math.max(remainingTokens, 200);
         const messages = this.getMessagesFitting(conversation.id, maxMessageTokens);
         const totalTokens = estimateTokens(systemPrompt) + estimateTokens(summaryText)
@@ -102,10 +110,13 @@ export class ContextBuilder {
         }
         const parts = [];
         // === STATIC SECTION (cacheable) ===
-        // Identity
-        parts.push(`You are ${agent.name}, a ${agent.role} agent.`);
+        // Identity — explicit override to prevent model's default persona bleeding through
+        parts.push(`IDENTITY: You are ${agent.name}, an AI agent running on the Arvis platform.`);
+        parts.push(`You are NOT Claude and you do NOT identify as Claude. You are ${agent.name}.`);
+        parts.push(`If anyone asks who you are, say you are ${agent.name}. Never say "I'm Claude" or "I'm an AI assistant made by Anthropic".`);
+        parts.push(`You ARE connected to the messaging platform this conversation is on — you can send messages, you have full access to tools, and you are fully operational.`);
         if (agent.description)
-            parts.push(agent.description);
+            parts.push(`\nPurpose: ${agent.description}`);
         // Personality
         if (agent.personality) {
             parts.push(`\nVoice: ${agent.personality.voice}.`);
@@ -124,6 +135,22 @@ export class ContextBuilder {
         if (agent.systemPrompt) {
             parts.push(`\n${agent.systemPrompt}`);
         }
+        // Tool hints — only show if the agent has built-in tools enabled
+        const builtInToolNames = ['web_search', 'calculate', 'get_time', 'http_fetch'];
+        const agentBuiltInTools = (agent.allowedTools || []).filter(t => builtInToolNames.includes(t));
+        if (agentBuiltInTools.length > 0) {
+            parts.push(`\nTOOLS AVAILABLE (call via structured function calling): ${agentBuiltInTools.join(', ')}`);
+            if (agentBuiltInTools.includes('web_search'))
+                parts.push('- web_search(query): search the web');
+            if (agentBuiltInTools.includes('calculate'))
+                parts.push('- calculate(expression): evaluate math');
+            if (agentBuiltInTools.includes('get_time'))
+                parts.push('- get_time(): get current date/time');
+            if (agentBuiltInTools.includes('http_fetch'))
+                parts.push('- http_fetch(url): fetch a URL');
+        }
+        // Delegation hint (all non-conductor agents)
+        parts.push('\nDELEGATION: To delegate a subtask to another agent, include [DELEGATE:agent-slug] task [/DELEGATE] in your response.');
         // === DYNAMIC SECTION (changes per turn, placed last for cache efficiency) ===
         // Sticky facts (critical constraints — always shown)
         const allSticky = stickyFacts ?? [];
@@ -174,7 +201,12 @@ export class ContextBuilder {
         return summaries.map(s => `[Previous context — ${s.createdAt}]\n${s.summary}`).join('\n---\n');
     }
     getMessagesFitting(conversationId, maxTokens) {
-        const messages = this.conversationManager.getHistory(conversationId);
+        const messages = this.conversationManager.getHistory(conversationId)
+            // Skip corrupted messages: system prompt bleed-through from old CLI runner format
+            .filter(m => m.role !== 'system' &&
+            !m.content.startsWith('<instructions>') &&
+            !m.content.startsWith('[user]:') &&
+            !m.content.startsWith('[assistant]:'));
         const result = [];
         let totalTokens = 0;
         // Work backwards from newest

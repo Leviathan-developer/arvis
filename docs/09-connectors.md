@@ -5,19 +5,17 @@
 
 ## Supported Platforms
 
-| Platform | Text | Images | Voice/Audio | Files | Outbound Media |
-|----------|------|--------|-------------|-------|----------------|
-| Discord | ✓ | ✓ (CDN URLs downloaded) | ✓ (planned) | ✓ (planned) | Text only* |
-| Telegram | ✓ | ✓ (base64 embedded) | ✓ (Whisper transcription) | ✓ (planned) | Text only* |
-| Slack | ✓ | Partial | - | - | Text only* |
-| WhatsApp | ✓ | ✓ (Graph API download) | ✓ (Whisper transcription) | - | Text only* |
-| Matrix | ✓ | - | - | - | Text only* |
-| Web/Dashboard | ✓ | - | - | - | Text + Markdown |
-| SMS | ✓ | - | - | - | Text only |
-| Email | ✓ | - | - | - | Text only |
-| Webhooks | ✓ | - | - | - | - |
-
-*Sending images/files back is a planned feature (Phase 10)
+| Platform | Text | Images (receive) | Voice/Audio | Files (receive) | Files/Images (send) | Read Receipts |
+|----------|------|-------------------|-------------|-----------------|---------------------|---------------|
+| Discord | ✓ | ✓ (CDN download) | Planned | ✓ (CDN download) | ✓ (attachments) | - |
+| Telegram | ✓ | ✓ (base64 embedded) | ✓ (Whisper) | ✓ (Bot API download) | ✓ (photo/audio/video/doc) | - |
+| Slack | ✓ | Partial | - | - | ✓ (filesUploadV2) | - |
+| WhatsApp | ✓ | ✓ (Graph API) | ✓ (Whisper) | Caption only | ✓ (media upload) | ✓ (blue checks) |
+| Matrix | ✓ | - | - | - | ✓ (mxc:// upload) | - |
+| Web/Dashboard | ✓ | ✓ (base64 upload) | - | ✓ (base64 upload) | ✓ (base64 WS) | ✓ (ACK) |
+| SMS | ✓ | - | - | - | - | - |
+| Email | ✓ | - | - | - | - | - |
+| Webhooks | ✓ | - | - | - | - | - |
 
 ---
 
@@ -126,7 +124,8 @@ Uses Meta's WhatsApp Business Cloud API. Requires:
 - Text messages
 - Images → downloaded via Graph API → base64 embedded
 - Audio → downloaded via Graph API → Whisper transcription
-- Reactions, read receipts (ignored)
+- Reactions (parsed as `[Reaction: emoji]`)
+- **Read receipts** — Arvis sends read receipts (blue checkmarks) when processing incoming messages
 
 **Webhook setup:**
 1. Set `WHATSAPP_WEBHOOK_PATH=/whatsapp` in .env
@@ -158,6 +157,9 @@ Built into the dashboard. Always available on port 5070 (configurable via `WEB_C
 - Browser-based real-time chat via WebSocket
 - Dashboard → Chat page
 - Dashboard → Agents → [Agent] → Chat tab
+- **File uploads** — drag-and-drop or paperclip button, sent as base64 via WebSocket
+- **Message ACK** — server sends `{ type: 'ack', messageId }` after receiving each message
+- Images uploaded are saved to `data/uploads/{conversationId}/` and passed to the LLM as vision input
 
 **Protocol:**
 ```
@@ -252,13 +254,13 @@ Messages to each bot are routed directly to the assigned agent (Router Step 0).
 
 ## Platform Limitations By Feature
 
-| Feature | Discord | Telegram | Slack | WhatsApp |
-|---------|---------|----------|-------|----------|
-| Message length | 2000 chars | 4096 chars | 40k chars | 4096 chars |
-| Markdown | Partial (bold, code) | Full HTML | Mrkdwn | None |
-| Typing indicator | ✓ | ✓ | ✓ | ✓ |
-| Message edit | Planned | Planned | - | - |
-| Thread reply | Planned | - | Planned | - |
-| Button/keyboard | - | ✓ (inline) | ✓ (blocks) | ✓ |
-| Voice | Planned | ✓ (Whisper) | - | ✓ (Whisper) |
-| Image send | Planned | Planned | - | Planned |
+| Feature | Discord | Telegram | Slack | WhatsApp | Matrix |
+|---------|---------|----------|-------|----------|--------|
+| Message length | 2000 chars | 4096 chars | 40k chars | 4096 chars | 8000 chars |
+| Markdown | Partial (bold, code) | Full HTML | Mrkdwn | None | HTML (org.matrix.custom.html) |
+| Typing indicator | ✓ | ✓ | ✓ | ✓ | - |
+| Message edit | Planned | Planned | - | - | - |
+| Thread reply | Planned | - | Planned | - | - |
+| Button/keyboard | - | ✓ (inline) | ✓ (blocks) | ✓ | - |
+| Voice receive | Planned | ✓ (Whisper) | - | ✓ (Whisper) | - |
+| Image/file send | ✓ | ✓ (photo/audio/video/doc) | ✓ (filesUploadV2) | ✓ (media upload) | ✓ (mxc:// upload) |

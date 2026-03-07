@@ -65,6 +65,13 @@ web_search     — DuckDuckGo search
 http_fetch     — Fetch any URL (HTML stripped, 3000 char limit)
 calculate      — Safe math evaluation
 get_time       — Current ISO datetime
+get_variable   — Retrieve stored variable/secret from dashboard
+write_plugin   — Write ESM plugin to plugins/ and auto-load
+list_plugins   — List all loaded plugin tools
+delete_plugin  — Delete a plugin file
+run_shell      — Run shell command and capture output
+read_file      — Read any file (8000 char limit)
+write_file     — Write content to any file
 ```
 
 ### Plugin Load Order
@@ -250,6 +257,55 @@ To add a new tag:
 1. Add the tag pattern to `ConductorParser.parse()` in `packages/core/src/agents/conductor.ts`
 2. Add the handler in `ConductorParser.execute()`
 3. Document it in `CONDUCTOR_SYSTEM_PROMPT` so the conductor knows to use it
+
+---
+
+## 5. Variables Store (Secrets Management)
+
+Store API keys, webhook URLs, tokens, and other configuration in the dashboard — accessible to agents on-demand via the `get_variable` tool, but **never leaked into system prompts**.
+
+### Adding Variables
+
+**Via Dashboard:**
+1. Go to Settings → Variables & Secrets
+2. Click "Add Variable"
+3. Enter key, value, optional description
+4. Check "Mark as secret" for sensitive values (hidden in UI)
+
+**Via API:**
+```bash
+curl -X POST http://localhost:5100/api/variables \
+  -H "Content-Type: application/json" \
+  -d '{"key": "GITHUB_TOKEN", "value": "ghp_xxx", "description": "GitHub API token", "isSecret": true}'
+```
+
+### How Agents Use Variables
+
+Enable `get_variable` in the agent's allowed tools. The agent can then retrieve values on demand:
+
+```
+Agent receives: "Check the GitHub issues for my repo"
+Agent calls: get_variable(key="GITHUB_TOKEN")
+Agent uses: the returned token to call GitHub API via http_fetch
+```
+
+### Security Model
+
+- Variables are stored in SQLite, **not** in `.env` files
+- Secret values are masked (`••••••••`) in all UI and API list responses
+- Values are **only** returned via the `get_variable` tool (on-demand)
+- Variables are **never** injected into system prompts or conversation context
+- Only the agent actively executing a tool call can access the value
+
+### Key Format
+
+Keys must contain only letters, numbers, underscores, hyphens, and dots:
+```
+MY_API_KEY          ✓
+webhook.url         ✓
+config-value-1      ✓
+my key with spaces  ✗
+```
 
 ---
 

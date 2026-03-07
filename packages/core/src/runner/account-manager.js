@@ -1,3 +1,4 @@
+import { ProviderRunner } from './provider-runner.js';
 import { createLogger } from '../logger.js';
 const log = createLogger('account-manager');
 const BACKOFF_MINUTES = [1, 5, 25, 60];
@@ -42,15 +43,13 @@ export class AccountManager {
             return null;
         return this.hydrate(row);
     }
-    /** Record usage for an account */
-    recordUsage(accountId, tokens) {
+    /** Record usage for an account (increments message counter) */
+    recordUsage(accountId) {
         this.db.run('UPDATE accounts SET total_messages = total_messages + 1 WHERE id = ?', accountId);
     }
     /** Record cost in the usage_log table */
     recordCost(accountId, inputTokens, outputTokens, model, provider, agentId, jobId) {
         try {
-            // Import dynamically to avoid circular deps
-            const { ProviderRunner } = require('./provider-runner.js');
             const costUsd = ProviderRunner.calculateCost(provider, model, inputTokens, outputTokens);
             this.db.run(`INSERT INTO usage_log (account_id, agent_id, job_id, model, provider, input_tokens, output_tokens, cost_usd)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, accountId, agentId ?? null, jobId ?? null, model, provider, inputTokens, outputTokens, costUsd);
@@ -87,7 +86,7 @@ export class AccountManager {
             totalMessages: r.total_messages,
         }));
     }
-    /** Ensure accounts from config exist in DB */
+    /** Ensure accounts from config exist in DB, updating home_dir/model if changed */
     syncFromConfig(accounts) {
         for (const acct of accounts) {
             const existing = this.db.get('SELECT * FROM accounts WHERE name = ?', acct.name);
@@ -95,6 +94,10 @@ export class AccountManager {
                 this.db.run(`INSERT INTO accounts (name, type, provider, home_dir, api_key, base_url, model, priority)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, acct.name, acct.type, acct.provider || 'anthropic', acct.homeDir ?? null, acct.apiKey ?? null, acct.baseUrl ?? null, acct.model, acct.priority ?? 100);
                 log.info({ name: acct.name, type: acct.type, provider: acct.provider || 'anthropic' }, 'Account synced from config');
+            }
+            else {
+                // Update home_dir and model from config so credential rotations take effect on restart
+                this.db.run(`UPDATE accounts SET home_dir = ?, model = ?, priority = ? WHERE name = ?`, acct.homeDir ?? null, acct.model, acct.priority ?? existing.priority ?? 100, acct.name);
             }
         }
     }

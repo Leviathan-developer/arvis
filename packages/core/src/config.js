@@ -17,16 +17,17 @@ export function loadConfig(envPath) {
     }
     // Build accounts list from all detected providers
     const accounts = [];
-    // --- Anthropic CLI subscriptions ---
-    const hasCliAccount = !!process.env.CLAUDE_CLI_HOME;
-    if (hasCliAccount) {
+    // --- Anthropic CLI subscriptions (supports indexed: CLAUDE_CLI_HOME, _1, _2, ...) ---
+    const cliHomes = collectIndexedKeys('CLAUDE_CLI_HOME');
+    const cliModels = collectIndexedKeys('CLAUDE_CLI_MODEL');
+    for (let i = 0; i < cliHomes.length; i++) {
         accounts.push({
-            name: 'primary-cli',
+            name: i === 0 ? 'primary-cli' : `primary-cli-${i + 1}`,
             type: 'cli_subscription',
             provider: 'anthropic',
-            homeDir: process.env.CLAUDE_CLI_HOME,
-            model: process.env.CLAUDE_CLI_MODEL || 'claude-sonnet-4-20250514',
-            priority: 10,
+            homeDir: cliHomes[i],
+            model: cliModels[i] || process.env.CLAUDE_CLI_MODEL || 'claude-sonnet-4-6',
+            priority: 10 + i, // 10, 11, 12 ... so first account is tried first
         });
     }
     // --- Anthropic API keys (supports indexed: ANTHROPIC_API_KEY, _1, _2, ...) ---

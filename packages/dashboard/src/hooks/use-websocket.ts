@@ -2,6 +2,15 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+export interface ChatAttachment {
+  filename: string;
+  contentType: string;
+  /** base64-encoded data */
+  data: string;
+  /** Preview URL for images (blob URL) */
+  previewUrl?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -11,6 +20,8 @@ export interface ChatMessage {
   isNew?: boolean;
   /** Delivery status for user messages */
   status?: 'sent' | 'delivered' | 'read';
+  /** File attachments */
+  attachments?: ChatAttachment[];
 }
 
 interface UseWebSocketOptions {
@@ -21,7 +32,7 @@ interface UseWebSocketOptions {
 
 interface UseWebSocketReturn {
   messages: ChatMessage[];
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string, attachments?: ChatAttachment[]) => void;
   stopGeneration: () => void;
   isConnected: boolean;
   isTyping: boolean;
@@ -108,6 +119,21 @@ export function useWebSocket({
             return;
           }
 
+          if (data.type === 'ack') {
+            // Server acknowledged receipt — upgrade message status
+            setMessages((prev) => {
+              const updated = [...prev];
+              for (let i = updated.length - 1; i >= 0; i--) {
+                if (updated[i].role === 'user' && updated[i].status === 'sent') {
+                  updated[i] = { ...updated[i], status: 'delivered' };
+                  break;
+                }
+              }
+              return updated;
+            });
+            return;
+          }
+
           if (data.type === 'typing') {
             if (typingTimer.current) clearTimeout(typingTimer.current);
             setIsTyping(true);
@@ -189,7 +215,7 @@ export function useWebSocket({
     };
   }, [connect, loadHistory]);
 
-  const sendMessage = useCallback((content: string) => {
+  const sendMessage = useCallback((content: string, attachments?: ChatAttachment[]) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
     setMessages((prev) => [
@@ -200,11 +226,20 @@ export function useWebSocket({
         content,
         timestamp: new Date().toISOString(),
         isNew: true,
-        status: 'delivered', // connected = delivered to server
+        status: 'sent',
+        attachments,
       },
     ]);
 
-    wsRef.current.send(JSON.stringify({ type: 'message', content }));
+    const payload: Record<string, unknown> = { type: 'message', content };
+    if (attachments?.length) {
+      payload.attachments = attachments.map((a) => ({
+        filename: a.filename,
+        contentType: a.contentType,
+        data: a.data,
+      }));
+    }
+    wsRef.current.send(JSON.stringify(payload));
   }, []);
 
   const stopGeneration = useCallback(() => {

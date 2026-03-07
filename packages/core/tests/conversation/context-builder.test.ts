@@ -62,7 +62,7 @@ describe('ContextBuilder', () => {
 
     // System prompt (Layer 1) includes identity
     expect(context.systemPrompt).toContain('Test Developer');
-    expect(context.systemPrompt).toContain('developer');
+    expect(context.systemPrompt).toContain('web development');
     expect(context.systemPrompt).toContain('casual');
 
     // Facts (Layer 5)

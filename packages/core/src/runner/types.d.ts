@@ -15,6 +15,21 @@ export interface RunRequest {
         role: string;
         content: string;
     }[];
+    /** Images for vision-capable models (base64 + MIME type) */
+    images?: {
+        base64: string;
+        mimeType: string;
+    }[];
+    /** Built-in tool names to enable for this run (web_search, calculate, get_time, http_fetch) */
+    tools?: string[];
+    /**
+     * Sandbox mode for CLI runner.
+     * - 'none' (default): run directly in the host process (no isolation)
+     * - 'docker': wrap the claude subprocess inside a Docker container
+     *   Requires Docker daemon to be running and ARVIS_SANDBOX_IMAGE env var set
+     *   (defaults to 'arvis-sandbox:latest')
+     */
+    sandbox?: 'none' | 'docker';
     account?: {
         id: number;
         type: AccountType;

@@ -98,7 +98,7 @@ export function loadConfig(envPath?: string): ArvisConfig {
       provider: 'anthropic',
       apiKey: anthropicKeys[i],
       model: process.env.ANTHROPIC_API_MODEL || 'claude-haiku-4-5-20251001',
-      priority: 20,
+      priority: 20 + i,
     });
   }
 
@@ -111,7 +111,7 @@ export function loadConfig(envPath?: string): ArvisConfig {
       provider: 'openai',
       apiKey: openaiKeys[i],
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      priority: 50,
+      priority: 50 + i,
     });
   }
 
@@ -124,7 +124,7 @@ export function loadConfig(envPath?: string): ArvisConfig {
       provider: 'openrouter',
       apiKey: openrouterKeys[i],
       model: process.env.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4',
-      priority: 60,
+      priority: 60 + i,
     });
   }
 
@@ -137,7 +137,7 @@ export function loadConfig(envPath?: string): ArvisConfig {
       provider: 'google',
       apiKey: googleKeys[i],
       model: process.env.GOOGLE_MODEL || 'gemini-2.0-flash',
-      priority: 70,
+      priority: 70 + i,
     });
   }
 

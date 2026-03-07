@@ -28,6 +28,7 @@ export { RateLimitError } from './runner/types.js';
 export { ConductorParser, CONDUCTOR_SYSTEM_PROMPT } from './agents/conductor.js';
 // Queue
 export { QueueManager } from './queue/queue-manager.js';
+export { assertJobPayload } from './queue/types.js';
 // Scheduler
 export { Scheduler } from './scheduler/scheduler.js';
 // Webhooks
@@ -37,11 +38,20 @@ export { BillingManager } from './billing/billing-manager.js';
 // Skills
 export { SkillLoader } from './skills/skill-loader.js';
 export { SkillInjector } from './skills/skill-injector.js';
+// Tools (built-in agent tools)
+export { ToolExecutor, getEnabledTools, getAllToolNames, registerTool, BUILT_IN_TOOLS, BUILT_IN_TOOL_NAMES } from './tools/tool-executor.js';
+// Delegation
+export { parseDelegations, stripDelegations } from './agents/delegation-parser.js';
 // Orchestrator
 export { Arvis } from './arvis.js';
 // Logger
 export { logger, createLogger } from './logger.js';
+// Connectors
+export { ConnectorManager } from './connectors/connector-manager.js';
+// Plugin system
+export { loadPlugins } from './plugins/plugin-loader.js';
 // Migrations
 export { default as initialMigration } from './db/migrations/001-initial.js';
 export { default as multiProviderMigration } from './db/migrations/002-multi-provider.js';
+export { default as botInstancesMigration } from './db/migrations/003-bot-instances.js';
 //# sourceMappingURL=index.js.map

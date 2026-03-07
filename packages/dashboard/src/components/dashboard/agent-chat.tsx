@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef, memo } from 'react';
-import { Send, Square, Check, CheckCheck, Wifi, WifiOff, Bot, AlertCircle, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { Send, Square, Check, CheckCheck, Wifi, WifiOff, Bot, AlertCircle, RotateCcw, Paperclip, X, FileIcon, ImageIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useWebSocket } from '@/hooks/use-websocket';
+import type { ChatAttachment } from '@/hooks/use-websocket';
 import { cn } from '@/lib/utils';
 
 interface AgentChatProps {
@@ -135,9 +136,38 @@ const StreamText = memo(function StreamText({ text, animate }: { text: string; a
 export function AgentChat({ agentId, agentName, compact = false }: AgentChatProps) {
   const [input, setInput] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<ChatAttachment[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { messages, sendMessage, stopGeneration, isConnected, isTyping, error, clearHistory } = useWebSocket({ agentId });
+
+  /** Convert a File to ChatAttachment (base64) */
+  const fileToAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
+    const buf = await file.arrayBuffer();
+    const data = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+    return { filename: file.name, contentType: file.type || 'application/octet-stream', data, previewUrl };
+  }, []);
+
+  /** Stage files from input or drop */
+  const stageFiles = useCallback(async (files: FileList | File[]) => {
+    const newAttachments: ChatAttachment[] = [];
+    for (const file of Array.from(files)) {
+      if (file.size > 10 * 1024 * 1024) continue; // 10MB limit
+      newAttachments.push(await fileToAttachment(file));
+    }
+    setStagedFiles((prev) => [...prev, ...newAttachments]);
+  }, [fileToAttachment]);
+
+  function removeStagedFile(idx: number) {
+    setStagedFiles((prev) => {
+      const removed = prev[idx];
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }
 
   const scrollToBottom = () => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -172,9 +202,11 @@ export function AgentChat({ agentId, agentName, compact = false }: AgentChatProp
 
   function handleSend() {
     const trimmed = input.trim();
-    if (!trimmed || !isConnected) return;
-    sendMessage(trimmed);
+    if ((!trimmed && stagedFiles.length === 0) || !isConnected) return;
+    const content = trimmed || (stagedFiles.length > 0 ? `[${stagedFiles.map(f => f.filename).join(', ')}]` : '');
+    sendMessage(content, stagedFiles.length > 0 ? stagedFiles : undefined);
     setInput('');
+    setStagedFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }
 
@@ -248,7 +280,13 @@ export function AgentChat({ agentId, agentName, compact = false }: AgentChatProp
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto flex flex-col">
+      <div
+        ref={scrollRef}
+        className={cn('flex-1 overflow-y-auto flex flex-col relative', isDragging && 'ring-2 ring-primary/50 ring-inset')}
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={async (e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files.length) await stageFiles(e.dataTransfer.files); }}
+      >
         {messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6">
             <div className="h-10 w-10 rounded-xl border border-border flex items-center justify-center">
@@ -287,6 +325,25 @@ export function AgentChat({ agentId, agentName, compact = false }: AgentChatProp
                       ? <StreamText text={msg.content} animate={!!msg.isNew} />
                       : <p className="whitespace-pre-wrap">{msg.content}</p>
                     }
+                    {/* Attachment thumbnails */}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {msg.attachments.map((att, i) => (
+                          <div key={i} className="flex items-center gap-1.5 bg-black/20 rounded px-2 py-1">
+                            {att.contentType.startsWith('image/') ? (
+                              att.previewUrl ? (
+                                <img src={att.previewUrl} alt={att.filename} className="h-8 w-8 rounded object-cover" />
+                              ) : (
+                                <ImageIcon className="h-3.5 w-3.5 opacity-60" />
+                              )
+                            ) : (
+                              <FileIcon className="h-3.5 w-3.5 opacity-60" />
+                            )}
+                            <span className="text-[10px] opacity-70 max-w-[100px] truncate">{att.filename}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className={cn('mt-1.5 flex items-center gap-1', msg.role === 'assistant' && 'pl-9')}>
@@ -323,11 +380,48 @@ export function AgentChat({ agentId, agentName, compact = false }: AgentChatProp
         )}
       </div>
 
+      {/* Staged files */}
+      {stagedFiles.length > 0 && (
+        <div className="px-4 pt-2 shrink-0 flex flex-wrap gap-1.5 border-t border-border/50">
+          {stagedFiles.map((file, i) => (
+            <div key={i} className="flex items-center gap-1.5 bg-muted/30 border border-border/50 rounded-md px-2 py-1 text-xs">
+              {file.contentType.startsWith('image/') && file.previewUrl ? (
+                <img src={file.previewUrl} alt={file.filename} className="h-5 w-5 rounded object-cover" />
+              ) : file.contentType.startsWith('image/') ? (
+                <ImageIcon className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              <span className="max-w-[120px] truncate text-muted-foreground">{file.filename}</span>
+              <button onClick={() => removeStagedFile(i)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Input */}
       <div className={cn('px-4 py-3 shrink-0 flex items-end gap-2', !compact && 'border-t border-border')}>
         {compact && (
           <span className={cn('mb-2.5 h-1.5 w-1.5 shrink-0 rounded-full', isConnected ? 'bg-emerald-500' : 'bg-muted-foreground/40')} />
         )}
+        {/* Paperclip — file upload */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={async (e) => { if (e.target.files?.length) { await stageFiles(e.target.files); e.target.value = ''; } }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!isConnected}
+          className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          title="Attach files"
+        >
+          <Paperclip className="h-3.5 w-3.5" />
+        </button>
         <textarea
           ref={textareaRef}
           value={input}

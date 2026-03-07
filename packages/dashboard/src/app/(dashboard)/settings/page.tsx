@@ -7,6 +7,8 @@ import { AccountsSection } from './_sections/accounts-section';
 import { BotsSection } from './_sections/bots-section';
 import { WebhooksSection } from './_sections/webhooks-section';
 import { HealthSection } from './_sections/health-section';
+import { VariablesSection } from './_sections/variables-section';
+import type { Variable } from './_sections/variables-section';
 import type { Agent, Account, BotInstance, WebhookEntry, HealthData } from './_sections/types';
 
 export default function SettingsPage() {
@@ -18,10 +20,11 @@ export default function SettingsPage() {
   const [savingConductor, setSavingConductor] = useState(false);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [connectorStatus, setConnectorStatus] = useState<Record<string, boolean>>({});
+  const [vars, setVars] = useState<Variable[] | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [a, h, ag, cfg, conn, b, wh] = await Promise.all([
+      const [a, h, ag, cfg, conn, b, wh, v] = await Promise.all([
         fetch('/api/accounts').then((r) => r.json()),
         fetch('/api/health').then((r) => r.json()),
         fetch('/api/agents').then((r) => r.json()),
@@ -29,6 +32,7 @@ export default function SettingsPage() {
         fetch('/api/connectors').then((r) => r.json()).catch(() => ({ configured: {} })),
         fetch('/api/bots').then((r) => r.json()).catch(() => []),
         fetch('/api/webhooks').then((r) => r.json()).catch(() => []),
+        fetch('/api/variables').then((r) => r.json()).catch(() => []),
       ]);
 
       if (conn.configured) setConnectorStatus(conn.configured as Record<string, boolean>);
@@ -36,6 +40,7 @@ export default function SettingsPage() {
       setHealth(h);
       setBots(Array.isArray(b) ? b : []);
       setWebhooks(Array.isArray(wh) ? wh : []);
+      setVars(Array.isArray(v) ? v : []);
 
       const agentList: Agent[] = Array.isArray(ag) ? ag : [];
       setAgents(agentList);
@@ -105,6 +110,11 @@ export default function SettingsPage() {
       <WebhooksSection
         webhooks={webhooks}
         agents={agents}
+        onReload={load}
+      />
+
+      <VariablesSection
+        variables={vars}
         onReload={load}
       />
 

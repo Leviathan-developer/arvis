@@ -24,8 +24,8 @@ export declare class AccountManager {
     getAvailable(mode: 'fast' | 'full'): Account | null;
     /** Get an available account for a specific provider */
     getAvailableForProvider(provider: Provider): Account | null;
-    /** Record usage for an account */
-    recordUsage(accountId: number, tokens: number): void;
+    /** Record usage for an account (increments message counter) */
+    recordUsage(accountId: number): void;
     /** Record cost in the usage_log table */
     recordCost(accountId: number, inputTokens: number, outputTokens: number, model: string, provider: string, agentId?: number, jobId?: number): void;
     /** Mark an account as rate limited with exponential backoff */
@@ -34,7 +34,7 @@ export declare class AccountManager {
     clearRateLimit(accountId: number): void;
     /** Get status of all accounts */
     getStatus(): AccountStatus[];
-    /** Ensure accounts from config exist in DB */
+    /** Ensure accounts from config exist in DB, updating home_dir/model if changed */
     syncFromConfig(accounts: {
         name: string;
         type: string;

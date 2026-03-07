@@ -4,6 +4,7 @@ import { ArvisDatabase } from './db/database.js';
 import initialMigration from './db/migrations/001-initial.js';
 import multiProviderMigration from './db/migrations/002-multi-provider.js';
 import botInstancesMigration from './db/migrations/003-bot-instances.js';
+import variablesMigration from './db/migrations/004-variables.js';
 import { ConnectorManager } from './connectors/connector-manager.js';
 import { MessageBus } from './bus/message-bus.js';
 import type { IncomingMessage, ButtonClick, Attachment } from './bus/types.js';
@@ -17,6 +18,7 @@ import { AgentRunner } from './runner/agent-runner.js';
 import { CLIRunner } from './runner/cli-runner.js';
 import { ProviderRunner } from './runner/provider-runner.js';
 import { AccountManager } from './runner/account-manager.js';
+import { RateLimitError } from './runner/types.js';
 import { QueueManager } from './queue/queue-manager.js';
 import { Scheduler } from './scheduler/scheduler.js';
 import { WebhookServer } from './webhooks/webhook-server.js';
@@ -24,7 +26,8 @@ import { BillingManager } from './billing/billing-manager.js';
 import { SkillLoader } from './skills/skill-loader.js';
 import { SkillInjector } from './skills/skill-injector.js';
 import { parseDelegations, stripDelegations } from './agents/delegation-parser.js';
-import { BUILT_IN_TOOL_NAMES } from './tools/tool-executor.js';
+import { BUILT_IN_TOOL_NAMES, setVariableManager } from './tools/tool-executor.js';
+import { VariableManager } from './variables/variable-manager.js';
 import { loadPlugins } from './plugins/plugin-loader.js';
 import type { QueueJob, JobPayload } from './queue/types.js';
 import { assertJobPayload } from './queue/types.js';
@@ -68,6 +71,7 @@ export class Arvis {
   readonly skillInjector: SkillInjector;
   readonly accountManager: AccountManager;
   readonly connectorManager: ConnectorManager;
+  readonly variableManager: VariableManager;
   private backupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(configPath?: string) {
@@ -97,14 +101,18 @@ export class Arvis {
     this.skillLoader = new SkillLoader(skillsDir, this.db);
     this.skillInjector = new SkillInjector(this.db);
     this.connectorManager = new ConnectorManager(this.db, this.bus);
+    this.variableManager = new VariableManager(this.db);
   }
 
   /** Start the Arvis platform */
   async start(): Promise<void> {
     // 1. Run database migrations
-    this.db.migrate([initialMigration, multiProviderMigration, botInstancesMigration]);
+    this.db.migrate([initialMigration, multiProviderMigration, botInstancesMigration, variablesMigration]);
 
-    // 2. Sync accounts from config
+    // 2. Wire variable manager into tool executor
+    setVariableManager(this.variableManager);
+
+    // 3. Sync accounts from config
     this.accountManager.syncFromConfig(this.config.accounts);
 
     // 3. Ensure Conductor agent exists
@@ -412,6 +420,20 @@ If you cannot complete the task, post a single line: "Error: [reason]" — nothi
       log.info({ jobId: job.id, contentLength: result.content.length, mode: result.mode, contentPreview: result.content.substring(0, 300) }, 'Runner returned');
     } catch (err) {
       log.error({ jobId: job.id, err }, 'Runner failed');
+
+      // Send rate-limit feedback to user so they know what's happening
+      const feedbackChannel = payload.channelId || payload.channel;
+      const feedbackPlatform = payload.platform;
+      if (err instanceof RateLimitError && feedbackChannel && feedbackPlatform) {
+        const attempts = job.attempts || 0;
+        const retryMinutes = Math.pow(2, attempts + 1);
+        this.bus.emit('send', {
+          channelId: String(feedbackChannel),
+          platform: String(feedbackPlatform),
+          content: `All AI accounts are rate-limited. Retrying automatically in ~${retryMinutes} minutes.`,
+        });
+      }
+
       throw err;
     }
 

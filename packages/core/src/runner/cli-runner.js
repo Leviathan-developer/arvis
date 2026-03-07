@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { estimateTokens } from '../lib/token-utils.js';
 import { createLogger } from '../logger.js';
 const log = createLogger('cli-runner');
 /**
@@ -17,21 +18,48 @@ export class CLIRunner {
         }
         const args = [
             '--print',
-            '--model', request.model || request.agent.model || 'claude-sonnet-4-20250514',
+            '--model', request.model || request.agent.model || 'claude-sonnet-4-6',
             '--max-turns', String(request.maxTurns || 25),
         ];
-        // Tool restrictions
+        // Tool restrictions — map Arvis tool names to Claude Code CLI built-in names
+        const ARVIS_TO_CLI = {
+            http_fetch: ['WebFetch'],
+            web_search: ['WebSearch'],
+            run_shell: ['Bash'],
+            read_file: ['Read'],
+            write_file: ['Write', 'Edit'],
+            write_plugin: ['Write', 'Edit'],
+            list_plugins: [],
+            delete_plugin: [],
+            get_time: [],
+            calculate: [],
+        };
         const tools = request.allowedTools || request.agent.allowedTools;
         if (tools?.length) {
+            const cliTools = new Set();
             for (const tool of tools) {
-                args.push('--allowedTools', tool);
+                const mapped = ARVIS_TO_CLI[tool];
+                if (mapped) {
+                    mapped.forEach(t => { if (t)
+                        cliTools.add(t); });
+                }
+                else {
+                    cliTools.add(tool); // pass through unknown tools unchanged
+                }
+            }
+            for (const t of cliTools) {
+                args.push('--allowedTools', t);
             }
         }
-        if (request.sessionId) {
-            args.push('--session-id', request.sessionId);
+        // Always continue the most-recent session in this CWD so each agent reuses
+        // one Claude Code session rather than creating a new one per message.
+        // --resume <id> has a known upstream bug in --print mode (anthropics/claude-code#1967),
+        // so we use --continue (most-recent) as the default for all invocations.
+        if (request.resume && request.sessionId) {
+            args.push('--resume', request.sessionId);
         }
-        if (request.resume) {
-            args.push('--continue');
+        else {
+            args.push('--continue'); // reuse most-recent session (or start fresh if none)
         }
         const env = { ...process.env };
         if (request.account?.homeDir) {
@@ -40,9 +68,41 @@ export class CLIRunner {
         }
         delete env.CLAUDECODE;
         const startTime = Date.now();
+        // ── Docker sandbox ────────────────────────────────────────────────────────
+        // When sandbox === 'docker', wrap the claude CLI inside a Docker container.
+        // The container gets:
+        //   - The session CWD mounted at /workspace (read-write)
+        //   - The HOME dir mounted at /home/claude (read-only, for credentials)
+        //   - No network access (--network none) — agent must use Arvis tool APIs instead
+        //   - CPU/memory limits to prevent runaway agents
+        // Set ARVIS_SANDBOX_IMAGE to override the default image.
+        let spawnCmd;
+        let spawnArgs;
+        if (request.sandbox === 'docker') {
+            const image = process.env.ARVIS_SANDBOX_IMAGE || 'arvis-sandbox:latest';
+            const homeDir = request.account?.homeDir || process.env.HOME || process.env.USERPROFILE || '/root';
+            spawnCmd = 'docker';
+            spawnArgs = [
+                'run', '--rm', '-i',
+                '--network', 'none',
+                '--cpus', '1',
+                '--memory', '512m',
+                '--mount', `type=bind,source=${cwd},target=/workspace,readonly=false`,
+                '--mount', `type=bind,source=${homeDir},target=/home/claude,readonly=true`,
+                '--env', `HOME=/home/claude`,
+                '--workdir', '/workspace',
+                image,
+                'claude', ...args,
+            ];
+            log.info({ image, cwd }, 'Starting CLI in Docker sandbox');
+        }
+        else {
+            spawnCmd = 'claude';
+            spawnArgs = args;
+        }
         return new Promise((resolve, reject) => {
-            log.info({ promptLen: fullPrompt.length, cwd }, 'Starting CLI');
-            const child = spawn('claude', args, {
+            log.info({ promptLen: fullPrompt.length, cwd, sandbox: request.sandbox || 'none' }, 'Starting CLI');
+            const child = spawn(spawnCmd, spawnArgs, {
                 cwd,
                 env: env,
                 shell: true,
@@ -60,6 +120,7 @@ export class CLIRunner {
             child.stdout.on('data', (d) => { stdout += d.toString(); });
             child.stderr.on('data', (d) => { stderr += d.toString(); });
             // Pipe full prompt via stdin
+            child.stdin.on('error', () => { });
             child.stdin.write(fullPrompt);
             child.stdin.end();
             child.on('close', (code) => {
@@ -78,7 +139,7 @@ export class CLIRunner {
                 }
                 // Log first 500 chars of output for debugging
                 log.debug({ output: stdout.substring(0, 500) }, 'CLI output preview');
-                const estimatedTokens = estimateTokensFromOutput(stdout);
+                const estimatedTokens = estimateTokens(stdout);
                 resolve({
                     content: stdout.trim(),
                     model: request.model || request.agent.model,
@@ -98,8 +159,5 @@ export class CLIRunner {
             });
         });
     }
-}
-function estimateTokensFromOutput(output) {
-    return Math.ceil(output.length / 3.5);
 }
 //# sourceMappingURL=cli-runner.js.map

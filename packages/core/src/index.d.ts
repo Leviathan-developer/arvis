@@ -24,7 +24,8 @@ export type { RunRequest, RunResult as RunnerResult, AccountStatus, Provider } f
 export { ConductorParser, CONDUCTOR_SYSTEM_PROMPT } from './agents/conductor.js';
 export type { ConductorAction, ExecutionResult } from './agents/conductor.js';
 export { QueueManager } from './queue/queue-manager.js';
-export type { QueueJob, QueueStatus, ProcessResult } from './queue/types.js';
+export type { QueueJob, QueueStatus, ProcessResult, JobPayload } from './queue/types.js';
+export { assertJobPayload } from './queue/types.js';
 export { Scheduler } from './scheduler/scheduler.js';
 export { WebhookServer } from './webhooks/webhook-server.js';
 export { BillingManager } from './billing/billing-manager.js';
@@ -32,8 +33,15 @@ export type { ClientConfig, Client, Charge, BillingSummary } from './billing/typ
 export { SkillLoader } from './skills/skill-loader.js';
 export { SkillInjector } from './skills/skill-injector.js';
 export type { Skill } from './skills/types.js';
+export { ToolExecutor, getEnabledTools, getAllToolNames, registerTool, BUILT_IN_TOOLS, BUILT_IN_TOOL_NAMES } from './tools/tool-executor.js';
+export type { ToolDefinition, ToolParam } from './tools/tool-executor.js';
+export { parseDelegations, stripDelegations } from './agents/delegation-parser.js';
+export type { DelegationRequest } from './agents/delegation-parser.js';
 export { Arvis } from './arvis.js';
 export { logger, createLogger } from './logger.js';
+export { ConnectorManager } from './connectors/connector-manager.js';
+export { loadPlugins } from './plugins/plugin-loader.js';
 export { default as initialMigration } from './db/migrations/001-initial.js';
 export { default as multiProviderMigration } from './db/migrations/002-multi-provider.js';
+export { default as botInstancesMigration } from './db/migrations/003-bot-instances.js';
 //# sourceMappingURL=index.d.ts.map

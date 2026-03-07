@@ -5,8 +5,8 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('memory');
 
-const MEMORY_TAG_RE = /\[MEMORY:(\w+)\]\s*([\s\S]+?)(?=\[(?:MEMORY|STATE):|$)/g;
-const STATE_TAG_RE = /\[STATE:(\w+)\]\s*([\s\S]+?)(?=\[(?:MEMORY|STATE):|$)/g;
+const MEMORY_TAG_RE = /\[MEMORY:(\w+)\]\s*(.+)/g;
+const STATE_TAG_RE = /\[STATE:(\w+)\]\s*(.+)/g;
 
 /**
  * Stores and retrieves long-term knowledge for each agent.
@@ -229,8 +229,8 @@ export class MemoryManager {
   /** Strip [MEMORY:*] and [STATE:*] tags from agent output before showing to user */
   stripTags(text: string): string {
     return text
-      .replace(/\[MEMORY:\w+\]\s*[\s\S]+?(?=\[(?:MEMORY|STATE):|$)/g, '')
-      .replace(/\[STATE:\w+\]\s*[\s\S]+?(?=\[(?:MEMORY|STATE):|$)/g, '')
+      .replace(/\[MEMORY:\w+\]\s*.+/g, '')
+      .replace(/\[STATE:\w+\]\s*.+/g, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }

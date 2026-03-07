@@ -1,5 +1,6 @@
 import type { ArvisConfig } from './config.js';
 import { ArvisDatabase } from './db/database.js';
+import { ConnectorManager } from './connectors/connector-manager.js';
 import { MessageBus } from './bus/message-bus.js';
 import { AgentRegistry } from './agents/agent-registry.js';
 import { Router } from './agents/router.js';
@@ -37,9 +38,13 @@ export declare class Arvis {
     readonly skillLoader: SkillLoader;
     readonly skillInjector: SkillInjector;
     readonly accountManager: AccountManager;
+    readonly connectorManager: ConnectorManager;
+    private backupInterval;
     constructor(configPath?: string);
     /** Start the Arvis platform */
     start(): Promise<void>;
+    /** Create a timestamped backup, keep last 7 */
+    private runBackup;
     /** Stop the Arvis platform gracefully */
     stop(): Promise<void>;
     private handleMessage;

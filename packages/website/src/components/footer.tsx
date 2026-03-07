@@ -43,8 +43,8 @@ export function Footer() {
           <FooterLinks links={[
             { label: 'GitHub',       href: GITHUB_URL },
             { label: 'Contributing', href: `${GITHUB_URL}/blob/main/CONTRIBUTING.md` },
-            { label: 'API Reference', href: '/docs/api' },
-            { label: 'Deployment',   href: '/docs/deployment' },
+            { label: 'API Reference', href: '/docs/12-api-reference' },
+            { label: 'Deployment',   href: '/docs/11-deployment' },
           ]} />
         </div>
 

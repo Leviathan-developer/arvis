@@ -1,9 +1,6 @@
+import { estimateTokens } from '../lib/token-utils.js';
 import { createLogger } from '../logger.js';
 const log = createLogger('conversation');
-/** Simple token estimator: ~3.5 chars per token for English text */
-function estimateTokens(text) {
-    return Math.ceil(text.length / 3.5);
-}
 /**
  * Tracks all conversations, stores messages, manages context window,
  * handles compaction and FTS5 search.
@@ -189,13 +186,20 @@ export class ConversationManager {
         };
     }
     hydrateMessage(row) {
+        let metadata = null;
+        if (row.metadata) {
+            try {
+                metadata = JSON.parse(row.metadata);
+            }
+            catch { /* malformed JSON — treat as no metadata */ }
+        }
         return {
             id: row.id,
             conversationId: row.conversation_id,
             role: row.role,
             content: row.content,
             tokenEstimate: row.token_estimate,
-            metadata: row.metadata ? JSON.parse(row.metadata) : null,
+            metadata,
             createdAt: row.created_at,
         };
     }

@@ -1,3 +1,19 @@
+/** Typed payload shape for message/heartbeat/cron queue jobs */
+export interface JobPayload {
+    conversationId?: number;
+    systemPrompt?: string;
+    prompt: string;
+    channelId?: string;
+    channel?: string;
+    platform?: string;
+    messageId?: string;
+    configId?: number;
+    cronId?: number;
+    images?: {
+        base64: string;
+        mimeType: string;
+    }[];
+}
 export interface QueueJob {
     id: number;
     agentId: number;
@@ -26,4 +42,6 @@ export interface ProcessResult {
     result?: string;
     error?: string;
 }
+/** Type guard to safely assert a value is a JobPayload */
+export declare function assertJobPayload(val: unknown): asserts val is JobPayload;
 //# sourceMappingURL=types.d.ts.map

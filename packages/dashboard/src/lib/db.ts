@@ -6,9 +6,11 @@ import {
   QueueManager,
   BillingManager,
   AccountManager,
+  VariableManager,
   initialMigration,
   multiProviderMigration,
   botInstancesMigration,
+  variablesMigration,
 } from '@arvis/core';
 import type { ArvisConfig } from '@arvis/core';
 
@@ -33,7 +35,7 @@ function getDb(): ArvisDatabase {
     } satisfies ArvisConfig;
 
     _db = new ArvisDatabase(config);
-    _db.migrate([initialMigration, multiProviderMigration, botInstancesMigration]);
+    _db.migrate([initialMigration, multiProviderMigration, botInstancesMigration, variablesMigration]);
   }
   return _db;
 }
@@ -45,3 +47,4 @@ export const memory = new MemoryManager(db);
 export const queue = new QueueManager(db);
 export const billing = new BillingManager(db);
 export const accounts = new AccountManager(db);
+export const variables = new VariableManager(db);

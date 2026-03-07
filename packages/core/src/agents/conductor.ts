@@ -149,6 +149,11 @@ export class ConductorParser {
           }
           case 'update_agent': {
             const slug = action.data.slug as string;
+            if (slug === 'conductor') {
+              results.push({ action, success: false, error: 'Cannot modify conductor via tags — security restriction' });
+              log.warn('Blocked conductor self-modification attempt');
+              break;
+            }
             const changes = this.buildAgentConfig(action.data);
             registry.update(slug, changes);
             results.push({ action, success: true });
@@ -166,6 +171,11 @@ export class ConductorParser {
           }
           case 'create_cron': {
             if (deps?.createCron) {
+              const schedule = String(action.data.schedule || '');
+              if (this.isScheduleTooFrequent(schedule)) {
+                results.push({ action, success: false, error: 'Schedule too frequent — minimum interval is 30 seconds' });
+                break;
+              }
               deps.createCron(action.data);
               results.push({ action, success: true });
             } else {
@@ -175,6 +185,11 @@ export class ConductorParser {
           }
           case 'create_heartbeat': {
             if (deps?.createHeartbeat) {
+              const schedule = String(action.data.schedule || '');
+              if (this.isScheduleTooFrequent(schedule)) {
+                results.push({ action, success: false, error: 'Schedule too frequent — minimum interval is 30 seconds' });
+                break;
+              }
               deps.createHeartbeat(action.data);
               results.push({ action, success: true });
             } else {
@@ -203,6 +218,25 @@ export class ConductorParser {
       .replace(CREATE_HEARTBEAT_RE, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
+  }
+
+  /** Check if a schedule runs more frequently than every 30 seconds */
+  private isScheduleTooFrequent(schedule: string): boolean {
+    if (!schedule) return false;
+    // Check "every Xs" format
+    const everyMatch = schedule.match(/^every\s+(\d+)\s*(s|sec|second|seconds?)$/i);
+    if (everyMatch && parseInt(everyMatch[1], 10) < 30) return true;
+    // Check cron — if first field is */N where N < 1 (sub-minute via 6-field cron)
+    const parts = schedule.trim().split(/\s+/);
+    if (parts.length === 6) {
+      // 6-field cron: second minute hour day month weekday
+      const secField = parts[0];
+      const secStep = secField.match(/^\*\/(\d+)$/);
+      if (secStep && parseInt(secStep[1], 10) < 30) return true;
+      // Explicit seconds list like "0,10,20,30,40,50" = every 10s
+      if (/^\d+(,\d+){3,}$/.test(secField)) return true;
+    }
+    return false;
   }
 
   private buildAgentConfig(data: CreateAgentData | UpdateAgentData): AgentConfig {

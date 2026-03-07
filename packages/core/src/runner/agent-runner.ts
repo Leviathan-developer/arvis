@@ -18,8 +18,6 @@ const log = createLogger('agent-runner');
  * doesn't break anything.
  */
 export class AgentRunner {
-  private _hasApiAccount: boolean | null = null;
-
   constructor(
     private cliRunner: CLIRunner,
     private providerRunner: ProviderRunner,
@@ -27,11 +25,7 @@ export class AgentRunner {
   ) {}
 
   private get hasApiAccount(): boolean {
-    if (this._hasApiAccount === null) {
-      const accounts = this.accountManager.getStatus();
-      this._hasApiAccount = accounts.some(a => a.type === 'api_key');
-    }
-    return this._hasApiAccount;
+    return this.accountManager.getStatus().some(a => a.type === 'api_key');
   }
 
   /**
@@ -45,7 +39,7 @@ export class AgentRunner {
    */
   async execute(request: RunRequest, depth = 0): Promise<RunResult> {
     if (depth > 10) {
-      throw new Error('All accounts exhausted after retries');
+      throw new RateLimitError('All accounts exhausted after retries');
     }
 
     // Determine the model spec — either from agent config or request override
@@ -149,7 +143,11 @@ export class AgentRunner {
   }
 
   /** Force a specific mode (used for compaction summaries, etc.) */
-  async executeWithMode(request: RunRequest, mode: 'fast' | 'full'): Promise<RunResult> {
+  async executeWithMode(request: RunRequest, mode: 'fast' | 'full', depth = 0): Promise<RunResult> {
+    if (depth > 5) {
+      throw new RateLimitError(`No ${mode} accounts available after retries`);
+    }
+
     const account = this.accountManager.getAvailable(mode);
     if (!account) {
       throw new RateLimitError(`No ${mode} accounts available`);
@@ -168,20 +166,39 @@ export class AgentRunner {
       model: request.model || account.model,
     };
 
-    const result = account.type === 'cli_subscription'
-      ? await this.cliRunner.execute(enrichedRequest)
-      : await this.providerRunner.execute(enrichedRequest);
+    try {
+      const result = account.type === 'cli_subscription'
+        ? await this.cliRunner.execute(enrichedRequest)
+        : await this.providerRunner.execute(enrichedRequest);
 
-    const fullResult: RunResult = {
-      ...result,
-      provider: result.provider || account.provider,
-      inputTokens: result.inputTokens || 0,
-      outputTokens: result.outputTokens || 0,
-      costUsd: result.costUsd || 0,
-    };
+      const fullResult: RunResult = {
+        ...result,
+        provider: result.provider || account.provider,
+        inputTokens: result.inputTokens || 0,
+        outputTokens: result.outputTokens || 0,
+        costUsd: result.costUsd || 0,
+      };
 
-    this.accountManager.recordUsage(account.id);
-    return fullResult;
+      this.accountManager.clearRateLimit(account.id);
+      this.accountManager.recordUsage(account.id);
+      this.accountManager.recordCost(
+        account.id,
+        fullResult.inputTokens,
+        fullResult.outputTokens,
+        fullResult.model,
+        account.provider,
+        request.agent.id,
+      );
+
+      return fullResult;
+    } catch (error) {
+      if (error instanceof RateLimitError) {
+        this.accountManager.markRateLimited(account.id, error.retryAfter);
+        log.info({ accountId: account.id, mode }, 'Account limit reached in executeWithMode, switching');
+        return this.executeWithMode(request, mode, depth + 1);
+      }
+      throw error;
+    }
   }
 }
 
