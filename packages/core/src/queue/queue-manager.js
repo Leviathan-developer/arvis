@@ -93,7 +93,7 @@ export class QueueManager {
         }
     }
     /** Start the processing loop */
-    start(intervalMs = 1000, concurrency = 1) {
+    start(intervalMs = 500, concurrency = 3) {
         if (this.running)
             return;
         this.running = true;

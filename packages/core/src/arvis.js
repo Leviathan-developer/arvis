@@ -356,15 +356,11 @@ If you cannot complete the task, post a single line: "Error: [reason]" — nothi
         }
         // Determine which built-in tools to enable for this agent
         const agentTools = (agent.allowedTools || []).filter(t => BUILT_IN_TOOL_NAMES.includes(t));
-        // Use a per-conversation working directory so --continue stays bound to the
-        // same conversation. Without this, all conversations for an agent share one CWD
-        // and --continue can bleed context across them.
-        const convId = payload.conversationId;
-        let sessionPath;
-        if (convId) {
-            sessionPath = path.join(this.config.dataDir, 'sessions', String(convId));
+        // Shared workspace — CLI runs are stateless (--no-session-persistence),
+        // so all agents share one CWD. Arvis DB owns all conversation history.
+        const sessionPath = path.join(this.config.dataDir, 'workspace');
+        if (!fs.existsSync(sessionPath))
             fs.mkdirSync(sessionPath, { recursive: true });
-        }
         let result;
         try {
             result = await this.runner.execute({

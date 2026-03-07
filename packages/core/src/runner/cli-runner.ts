@@ -7,9 +7,12 @@ const log = createLogger('cli-runner');
 
 /**
  * Executes Claude via the CLI subprocess.
- * System prompt is embedded in the user prompt since --system-prompt
- * flag exceeds Windows command line length limits for long prompts.
- * User prompt is piped via stdin.
+ *
+ * Stateless design: Arvis owns all conversation history (DB-backed).
+ * Each CLI invocation gets a fresh, self-contained prompt with full context.
+ * No session persistence — no session files on disk, no folder sprawl.
+ *
+ * System prompt piped via stdin (avoids Windows command-line length limits).
  */
 export class CLIRunner {
   async execute(request: RunRequest): Promise<RunResult> {
@@ -23,6 +26,7 @@ export class CLIRunner {
 
     const args = [
       '--print',
+      '--no-session-persistence',  // Arvis manages history — don't save CLI sessions to disk
       '--model', request.model || request.agent.model || 'claude-sonnet-4-6',
       '--max-turns', String(request.maxTurns || 25),
     ];
@@ -56,16 +60,6 @@ export class CLIRunner {
       }
     }
 
-    // Always continue the most-recent session in this CWD so each agent reuses
-    // one Claude Code session rather than creating a new one per message.
-    // --resume <id> has a known upstream bug in --print mode (anthropics/claude-code#1967),
-    // so we use --continue (most-recent) as the default for all invocations.
-    if (request.resume && request.sessionId) {
-      args.push('--resume', request.sessionId);
-    } else {
-      args.push('--continue'); // reuse most-recent session (or start fresh if none)
-    }
-
     const env: Record<string, string | undefined> = { ...process.env };
     if (request.account?.homeDir) {
       env.HOME = request.account.homeDir;
@@ -76,13 +70,6 @@ export class CLIRunner {
     const startTime = Date.now();
 
     // ── Docker sandbox ────────────────────────────────────────────────────────
-    // When sandbox === 'docker', wrap the claude CLI inside a Docker container.
-    // The container gets:
-    //   - The session CWD mounted at /workspace (read-write)
-    //   - The HOME dir mounted at /home/claude (read-only, for credentials)
-    //   - No network access (--network none) — agent must use Arvis tool APIs instead
-    //   - CPU/memory limits to prevent runaway agents
-    // Set ARVIS_SANDBOX_IMAGE to override the default image.
     let spawnCmd: string;
     let spawnArgs: string[];
 
@@ -114,7 +101,6 @@ export class CLIRunner {
       const child = spawn(spawnCmd, spawnArgs, {
         cwd,
         env: env as NodeJS.ProcessEnv,
-        shell: true,
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -154,7 +140,6 @@ export class CLIRunner {
           return;
         }
 
-        // Log first 500 chars of output for debugging
         log.debug({ output: stdout.substring(0, 500) }, 'CLI output preview');
 
         const estimatedTokens = estimateTokens(stdout);
@@ -167,7 +152,7 @@ export class CLIRunner {
           tokensUsed: estimatedTokens,
           costUsd: 0, // CLI subscription — no per-request cost
           mode: 'full',
-          sessionId: request.sessionId,
+          sessionId: undefined,
           durationMs,
         });
       });
