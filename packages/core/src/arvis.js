@@ -356,11 +356,9 @@ If you cannot complete the task, post a single line: "Error: [reason]" — nothi
         }
         // Determine which built-in tools to enable for this agent
         const agentTools = (agent.allowedTools || []).filter(t => BUILT_IN_TOOL_NAMES.includes(t));
-        // Shared workspace — CLI runs are stateless (--no-session-persistence),
-        // so all agents share one CWD. Arvis DB owns all conversation history.
-        const sessionPath = path.join(this.config.dataDir, 'workspace');
-        if (!fs.existsSync(sessionPath))
-            fs.mkdirSync(sessionPath, { recursive: true });
+        // CLI runs are stateless (--no-session-persistence) — use Arvis root as CWD
+        // so the workspace is already trusted by Claude CLI.
+        const sessionPath = undefined;
         let result;
         try {
             result = await this.runner.execute({
