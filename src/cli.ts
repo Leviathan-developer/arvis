@@ -4,7 +4,7 @@ import path from 'path';
 import { Arvis, createLogger } from '@arvis/core';
 
 const log = createLogger('main');
-const VERSION = '3.1.0';
+const VERSION = '3.2.0';
 
 const BANNER = `
   \x1b[35m█████╗ ██████╗ ██╗   ██╗██╗███████╗\x1b[0m
