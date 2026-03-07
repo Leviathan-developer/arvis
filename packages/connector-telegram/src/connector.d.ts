@@ -9,13 +9,15 @@ export declare class TelegramConnector {
     private bus;
     private config;
     private bot;
+    private sendHandler;
+    private typingHandler;
     constructor(bus: MessageBus, config: {
         token: string;
         defaultAgentId?: number | null;
     });
     /** Start the Telegram connector */
     start(): Promise<void>;
-    /** Stop the connector */
+    /** Stop the connector — remove bus listeners before stopping bot */
     stop(): Promise<void>;
     /** Convert a grammy Context to an IncomingMessage */
     parseMessage(ctx: Context): IncomingMessage;

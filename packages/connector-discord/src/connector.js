@@ -14,6 +14,8 @@ export class DiscordConnector {
     bus;
     config;
     client;
+    sendHandler = null;
+    typingHandler = null;
     constructor(bus, config) {
         this.bus = bus;
         this.config = config;
@@ -33,6 +35,9 @@ export class DiscordConnector {
         this.client.on('messageCreate', (msg) => {
             if (msg.author.bot)
                 return;
+            // If allowedChannels is set, only relay messages from those channels
+            if (this.config.allowedChannels?.length && !this.config.allowedChannels.includes(msg.channelId))
+                return;
             this.bus.emit('message', this.parseMessage(msg));
         });
         // Button interactions
@@ -42,23 +47,39 @@ export class DiscordConnector {
             this.bus.emit('button_click', this.parseButtonClick(interaction));
             interaction.deferUpdate().catch(() => { });
         });
-        // Outgoing messages
-        this.bus.on('send', async (msg) => {
+        // Outgoing messages — store ref so we can remove it on stop()
+        this.sendHandler = async (msg) => {
             if (msg.platform !== 'discord')
                 return;
-            await this.sendToDiscord(msg);
-        });
-        // Typing indicator
-        this.bus.on('typing', (data) => {
+            try {
+                await this.sendToDiscord(msg);
+            }
+            catch (err) {
+                // Don't let a send failure crash the process
+                console.error('[discord] sendToDiscord failed:', err instanceof Error ? err.message : err);
+            }
+        };
+        this.bus.on('send', this.sendHandler);
+        // Typing indicator — store ref so we can remove it on stop()
+        this.typingHandler = (data) => {
             if (data.platform !== 'discord')
                 return;
             const channel = this.client.channels.cache.get(data.channelId);
             channel?.sendTyping().catch(() => { });
-        });
+        };
+        this.bus.on('typing', this.typingHandler);
         await this.client.login(this.config.token);
     }
-    /** Stop the connector */
+    /** Stop the connector — remove all bus listeners before destroying client */
     async stop() {
+        if (this.sendHandler) {
+            this.bus.off('send', this.sendHandler);
+            this.sendHandler = null;
+        }
+        if (this.typingHandler) {
+            this.bus.off('typing', this.typingHandler);
+            this.typingHandler = null;
+        }
         this.client.destroy();
     }
     /** Convert Discord message to IncomingMessage */

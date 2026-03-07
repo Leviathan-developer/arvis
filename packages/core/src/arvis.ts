@@ -79,6 +79,9 @@ export class Arvis {
     this.db = new ArvisDatabase(this.config);
     this.bus = new MessageBus();
 
+    // Run migrations before anything else touches the DB
+    this.db.migrate([initialMigration, multiProviderMigration, botInstancesMigration, variablesMigration]);
+
     // Initialize all components
     this.registry = new AgentRegistry(this.db);
     this.router = new Router(this.registry, this.bus, this.config);
@@ -106,10 +109,7 @@ export class Arvis {
 
   /** Start the Arvis platform */
   async start(): Promise<void> {
-    // 1. Run database migrations
-    this.db.migrate([initialMigration, multiProviderMigration, botInstancesMigration, variablesMigration]);
-
-    // 2. Wire variable manager into tool executor
+    // 1. Wire variable manager into tool executor
     setVariableManager(this.variableManager);
 
     // 3. Sync accounts from config

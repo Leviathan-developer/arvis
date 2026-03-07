@@ -1,55 +1,58 @@
-import { loadConfig } from '@arvis/core';
-import { ArvisDatabase } from '@arvis/core';
+/**
+ * First-time setup helper.
+ * Usually not needed — `npm start` handles everything automatically.
+ * Use this if you want to verify your config before starting.
+ */
+import { loadConfig, ArvisDatabase, AccountManager } from '@arvis/core';
 import initialMigration from '../packages/core/src/db/migrations/001-initial.js';
-import { AccountManager } from '@arvis/core';
+import multiProviderMigration from '../packages/core/src/db/migrations/002-multi-provider.js';
+import botInstancesMigration from '../packages/core/src/db/migrations/003-bot-instances.js';
+import variablesMigration from '../packages/core/src/db/migrations/004-variables.js';
 import fs from 'fs';
 import path from 'path';
 
 async function setup() {
-  console.log('=== Arvis v3 Setup ===\n');
+  console.log('\n  Arvis Setup\n');
 
-  // Check for .env
+  // Auto-create .env if missing
   const envPath = path.resolve(process.cwd(), '.env');
   if (!fs.existsSync(envPath)) {
     const examplePath = path.resolve(process.cwd(), '.env.example');
     if (fs.existsSync(examplePath)) {
       fs.copyFileSync(examplePath, envPath);
-      console.log('Created .env from .env.example — please fill in your values.\n');
+      console.log('  Created .env from .env.example');
+      console.log('  Edit .env with your API keys, then run: npm start\n');
       process.exit(0);
     } else {
-      console.error('No .env file found. Copy .env.example to .env and fill in your values.');
+      console.error('  No .env.example found.');
       process.exit(1);
     }
   }
 
-  // Load config
   const config = loadConfig();
-  console.log(`Data directory: ${config.dataDir}`);
+  console.log(`  Data directory: ${config.dataDir}`);
 
-  // Initialize database
+  // Run all migrations
   const db = new ArvisDatabase(config);
-  db.migrate([initialMigration]);
-  console.log('Database initialized and migrations applied.');
+  db.migrate([initialMigration, multiProviderMigration, botInstancesMigration, variablesMigration]);
+  console.log('  Database ready.');
 
   // Sync accounts
   const accounts = new AccountManager(db);
   accounts.syncFromConfig(config.accounts);
-  console.log(`Accounts synced: ${config.accounts.length} account(s)`);
+  console.log(`  ${config.accounts.length} LLM account(s) configured.`);
 
   // Create data subdirectories
-  for (const subdir of ['logs', 'backups']) {
-    const dir = path.join(config.dataDir, subdir);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+  for (const sub of ['logs', 'backups', 'uploads', 'sessions']) {
+    const dir = path.join(config.dataDir, sub);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
   db.close();
-
-  console.log('\nSetup complete! Run `npm start` to launch Arvis.');
+  console.log('\n  Setup complete. Run: npm start\n');
 }
 
 setup().catch((err) => {
-  console.error('Setup failed:', err.message);
+  console.error('  Setup failed:', err.message);
   process.exit(1);
 });

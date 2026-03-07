@@ -1,6 +1,6 @@
 {
   "name": "@arvis/website",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
