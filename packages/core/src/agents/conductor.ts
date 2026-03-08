@@ -186,8 +186,10 @@ export class ConductorParser {
           case 'create_heartbeat': {
             if (deps?.createHeartbeat) {
               const schedule = String(action.data.schedule || '');
-              if (this.isScheduleTooFrequent(schedule)) {
-                results.push({ action, success: false, error: 'Schedule too frequent — minimum interval is 30 seconds' });
+              const isScript = !!(action.data.script);
+              // Script heartbeats can run every 1s (no LLM cost). LLM heartbeats need ≥30s.
+              if (!isScript && this.isScheduleTooFrequent(schedule)) {
+                results.push({ action, success: false, error: 'Schedule too frequent — minimum interval is 30 seconds (use script heartbeat for faster intervals)' });
                 break;
               }
               deps.createHeartbeat(action.data);
@@ -628,6 +630,22 @@ prompt: Fetch the Bitcoin price and post it here
 channel: 1234567890123456789
 platform: discord
 [/CREATE_HEARTBEAT]
+
+TO SET UP A SCRIPT HEARTBEAT (NO LLM — fetches URL and posts directly, zero cost):
+Use this for simple data fetching (prices, status checks, API polling).
+The agent is only triggered when a condition matches — otherwise no LLM call at all.
+[CREATE_HEARTBEAT]
+agent: agent-slug
+name: SOL Price Tracker
+schedule: every 5s
+prompt: (ignored for scripts — only used if condition triggers)
+channel: 1234567890123456789
+platform: discord
+script: {"type":"script","url":"https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_24hr_change=true","template":"SOL: \${{solana.usd}} ({{solana.usd_24h_change}}% 24h)","condition":{"path":"solana.usd_24h_change","op":"<","value":-5,"triggerPrompt":"SOL crashed {{solana.usd_24h_change}}% in 24h (now \${{solana.usd}}). Analyze and advise."}}
+[/CREATE_HEARTBEAT]
+Script heartbeats: url=API endpoint, template=message format ({{path.to.value}}), condition=optional trigger.
+Without condition: just fetches and posts. With condition: posts always, triggers agent only when condition matches.
+PREFER script heartbeats for simple price/status fetches — they run every tick with ZERO LLM cost.
 
 TO SET UP A CRON JOB (complex or time-specific scheduling):
 [CREATE_CRON]

@@ -96,6 +96,7 @@ export class Arvis {
 
     this.queue = new QueueManager(this.db);
     this.scheduler = new Scheduler(this.db, this.queue);
+    this.scheduler.setBus(this.bus);
     this.webhookServer = new WebhookServer(this.db, this.queue);
     this.billingManager = new BillingManager(this.db);
     this.conductorParser = new ConductorParser();
@@ -475,18 +476,21 @@ If you cannot complete the task, post a single line: "Error: [reason]" — nothi
             if (!hbAgent) throw new Error(`Agent "${hbAgentSlug}" not found for heartbeat`);
             const channelId = data.channel != null ? String(data.channel) : null;
             const platform = data.platform ? String(data.platform) : 'discord';
-            log.info({ hbAgentSlug, channelId, platform, data: JSON.stringify(data) }, 'Creating heartbeat with data');
+            // Script heartbeats store config in run_condition
+            const runCondition = data.script ? (typeof data.script === 'string' ? data.script : JSON.stringify(data.script)) : null;
+            log.info({ hbAgentSlug, channelId, platform, isScript: !!runCondition }, 'Creating heartbeat');
             this.db.run(
-              `INSERT INTO heartbeat_configs (agent_id, name, prompt, schedule, channel_id, platform)
-               VALUES (?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO heartbeat_configs (agent_id, name, prompt, schedule, channel_id, platform, run_condition)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
               hbAgent.id,
               String(data.name || 'Heartbeat'),
               String(data.prompt || ''),
               String(data.schedule || 'every 60s'),
               channelId,
               platform,
+              runCondition,
             );
-            log.info({ agentSlug: hbAgentSlug, name: data.name, schedule: data.schedule, channelId, platform }, 'Heartbeat created');
+            log.info({ agentSlug: hbAgentSlug, name: data.name, schedule: data.schedule, channelId, platform, script: !!runCondition }, 'Heartbeat created');
           },
         });
         for (const r of results) {
