@@ -13,14 +13,35 @@ import {
   variablesMigration,
 } from '@arvis/core';
 import type { ArvisConfig } from '@arvis/core';
+import path from 'path';
+import fs from 'fs';
 
 let _db: ArvisDatabase | null = null;
+
+function resolveDataDir(): string {
+  // Explicit env var takes priority (absolute path recommended)
+  if (process.env.ARVIS_DATA_DIR) {
+    return path.resolve(process.env.ARVIS_DATA_DIR);
+  }
+  // Try <cwd>/data first (Docker / standalone — CWD is project root)
+  const cwdData = path.resolve(process.cwd(), 'data');
+  if (fs.existsSync(path.join(cwdData, 'arvis.db'))) {
+    return cwdData;
+  }
+  // Next.js workspace: CWD = packages/dashboard/ — project root is 2 levels up
+  const workspaceData = path.resolve(process.cwd(), '..', '..', 'data');
+  if (fs.existsSync(path.join(workspaceData, 'arvis.db'))) {
+    return workspaceData;
+  }
+  // No existing DB found — default to workspace layout (core will create it)
+  return workspaceData;
+}
 
 function getDb(): ArvisDatabase {
   if (!_db) {
     // Minimal config — dashboard only needs dataDir for DB access
     const config = {
-      dataDir: process.env.ARVIS_DATA_DIR || './data',
+      dataDir: resolveDataDir(),
       discord: { token: '', ownerId: '' },
       telegram: {},
       slack: {},

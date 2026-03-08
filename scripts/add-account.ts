@@ -66,21 +66,21 @@ if (fs.existsSync(claudeDir) && fs.readdirSync(claudeDir).length > 0) {
   process.exit(0);
 }
 
-console.log(`  \x1b[36m⏳\x1b[0m Launching Claude CLI to authenticate as "${name}"...`);
+console.log(`  \x1b[36m⏳\x1b[0m Launching Claude CLI login for account "${name}"...`);
 console.log(`  \x1b[90m   (A browser window will open — log in with your Claude account)\x1b[0m`);
 console.log('');
 
-// Spawn claude interactively with HOME set to the account directory
-const env = { ...process.env, CLAUDECODE: undefined as unknown as string };
+// Spawn `claude auth login` — authenticates and exits cleanly (no interactive terminal)
+const env = { ...process.env } as Record<string, string | undefined>;
 if (process.platform === 'win32') {
   env.USERPROFILE = accountDir;
 } else {
   env.HOME = accountDir;
 }
-// Remove CLAUDECODE so it doesn't block nested launch
+// Remove CLAUDECODE so it doesn't block nested launch from within Claude Code
 delete env.CLAUDECODE;
 
-const child = spawn('claude', [], {
+const child = spawn('claude', ['auth', 'login'], {
   cwd: accountDir,
   env,
   stdio: 'inherit',
@@ -100,32 +100,19 @@ child.on('close', (code) => {
 });
 
 function printEnvInstructions() {
-  const relPath = path.relative(ROOT, accountDir);
-  const absPath = accountDir;
   const existingAccounts = fs.readdirSync(ACCOUNTS_DIR).filter(d =>
     fs.statSync(path.join(ACCOUNTS_DIR, d)).isDirectory() &&
     fs.existsSync(path.join(ACCOUNTS_DIR, d, '.claude'))
   );
-  const index = existingAccounts.indexOf(name);
 
   console.log('');
-  console.log(`  \x1b[35mAdd to your .env:\x1b[0m`);
+  console.log(`  \x1b[32m✓ Account auto-detected!\x1b[0m`);
+  console.log(`  \x1b[90m  Arvis scans data/accounts/ on startup — no .env changes needed.\x1b[0m`);
   console.log('');
-
-  if (existingAccounts.length === 1) {
-    console.log(`  CLAUDE_CLI_HOME=${absPath}`);
-  } else {
-    // Show all accounts with indexed env vars
-    for (let i = 0; i < existingAccounts.length; i++) {
-      const accPath = path.join(ACCOUNTS_DIR, existingAccounts[i]);
-      const suffix = i === 0 ? '' : `_${i + 1}`;
-      console.log(`  CLAUDE_CLI_HOME${suffix}=${accPath}`);
-    }
+  console.log(`  \x1b[90m  Authenticated accounts (${existingAccounts.length}):\x1b[0m`);
+  for (const acc of existingAccounts) {
+    console.log(`    \x1b[90m• ${acc}\x1b[0m`);
   }
-
   console.log('');
-  console.log(`  \x1b[90mOr add via Dashboard → Settings → Accounts → Add Account`);
-  console.log(`  Type: CLI Subscription, Home Dir: ${absPath}\x1b[0m`);
-  console.log('');
-  console.log(`  \x1b[90mTotal accounts: ${existingAccounts.length}\x1b[0m`);
+  console.log(`  \x1b[90m  Run \x1b[0mnpm run add-account\x1b[90m again to add more accounts.\x1b[0m`);
 }

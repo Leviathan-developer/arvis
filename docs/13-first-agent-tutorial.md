@@ -16,12 +16,12 @@ A Bitcoin price monitoring agent that:
 ## Step 1: Start Arvis
 
 ```bash
-# Make sure you have at least one LLM account configured in .env
-# Either a Claude subscription:
-CLAUDE_CLI_HOME=/home/you/.claude
+# Make sure you have at least one LLM account:
+# Option A — Claude CLI subscription (no per-token cost):
+npm run add-account
 
-# Or an API key:
-ANTHROPIC_API_KEY=sk-ant-...
+# Option B — API key (add to .env):
+# ANTHROPIC_API_KEY=sk-ant-...
 
 # Start the core
 npm start
