@@ -53,13 +53,14 @@ export async function GET(
       id: number;
       role: string;
       content: string;
-      tokens_estimate: number | null;
+      token_estimate: number | null;
       created_at: string;
     }>(
-      `SELECT id, role, content, tokens_estimate, created_at
+      `SELECT id, role, content, token_estimate, created_at
        FROM messages
        WHERE conversation_id = ?
          AND role IN ('user', 'assistant')
+         AND content IS NOT NULL
          AND content NOT LIKE '<instructions>%'
          AND content NOT LIKE '[user]:%'
          AND content NOT LIKE '[assistant]:%'
