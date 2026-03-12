@@ -1,105 +1,114 @@
-import { spawn } from 'child_process';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { estimateTokens } from '../lib/token-utils.js';
 import { createLogger } from '../logger.js';
 const log = createLogger('cli-runner');
 /**
- * Executes Claude via the CLI subprocess.
- * System prompt is embedded in the user prompt since --system-prompt
- * flag exceeds Windows command line length limits for long prompts.
- * User prompt is piped via stdin.
+ * Executes Claude via the official Agent SDK.
+ *
+ * Stateless design: Arvis owns all conversation history (DB-backed).
+ * Each invocation gets a fresh, self-contained prompt with full context.
+ * No session persistence — no session files on disk, no folder sprawl.
+ *
+ * Uses @anthropic-ai/claude-agent-sdk instead of manual child_process.spawn.
+ * Handles Windows .cmd resolution, stdin piping, and platform quirks automatically.
  */
 export class CLIRunner {
     async execute(request) {
         const cwd = request.projectPath || request.agent.projectPath || process.cwd();
+        const startTime = Date.now();
         // Build the full prompt with system instructions embedded
         let fullPrompt = request.prompt;
         if (request.systemPrompt) {
             fullPrompt = `<instructions>\n${request.systemPrompt}\n</instructions>\n\nRespond to the following. You MUST follow all instructions above, especially any action tag formats.\n\n${request.prompt}`;
         }
-        const args = [
-            '--print',
-            '--model', request.model || request.agent.model || 'claude-sonnet-4-20250514',
-            '--max-turns', String(request.maxTurns || 25),
-        ];
-        // Tool restrictions
+        // Map Arvis tool names to Claude Code CLI tool names
+        const ARVIS_TO_CLI = {
+            http_fetch: ['WebFetch'],
+            web_search: ['WebSearch'],
+            run_shell: ['Bash'],
+            read_file: ['Read'],
+            write_file: ['Write', 'Edit'],
+            write_plugin: ['Write', 'Edit'],
+            list_plugins: [],
+            delete_plugin: [],
+            get_time: [],
+            calculate: [],
+        };
         const tools = request.allowedTools || request.agent.allowedTools;
+        const allowedTools = [];
         if (tools?.length) {
+            const cliTools = new Set();
             for (const tool of tools) {
-                args.push('--allowedTools', tool);
+                const mapped = ARVIS_TO_CLI[tool];
+                if (mapped) {
+                    mapped.forEach(t => { if (t)
+                        cliTools.add(t); });
+                }
+                else {
+                    cliTools.add(tool);
+                }
             }
+            allowedTools.push(...cliTools);
         }
-        if (request.sessionId) {
-            args.push('--session-id', request.sessionId);
-        }
-        if (request.resume) {
-            args.push('--continue');
-        }
+        // Build env — multi-account support via HOME dir override
         const env = { ...process.env };
         if (request.account?.homeDir) {
             env.HOME = request.account.homeDir;
             env.USERPROFILE = request.account.homeDir;
         }
         delete env.CLAUDECODE;
-        const startTime = Date.now();
-        return new Promise((resolve, reject) => {
-            log.info({ promptLen: fullPrompt.length, cwd }, 'Starting CLI');
-            const child = spawn('claude', args, {
-                cwd,
-                env: env,
-                shell: true,
-                windowsHide: true,
-                stdio: ['pipe', 'pipe', 'pipe'],
+        log.info({ promptLen: fullPrompt.length, cwd, model: request.model || request.agent.model }, 'Starting SDK query');
+        try {
+            const conversation = query({
+                prompt: fullPrompt,
+                options: {
+                    model: request.model || request.agent.model || 'claude-sonnet-4-6',
+                    maxTurns: request.maxTurns || 25,
+                    cwd,
+                    env,
+                    persistSession: false,
+                    allowedTools,
+                    permissionMode: 'bypassPermissions',
+                    allowDangerouslySkipPermissions: true,
+                },
             });
-            let stdout = '';
-            let stderr = '';
-            let killed = false;
-            const timeout = setTimeout(() => {
-                killed = true;
-                child.kill('SIGKILL');
-                reject(new Error('Claude CLI timed out after 180s'));
-            }, 180_000);
-            child.stdout.on('data', (d) => { stdout += d.toString(); });
-            child.stderr.on('data', (d) => { stderr += d.toString(); });
-            // Pipe full prompt via stdin
-            child.stdin.write(fullPrompt);
-            child.stdin.end();
-            child.on('close', (code) => {
-                clearTimeout(timeout);
-                if (killed)
-                    return;
-                const durationMs = Date.now() - startTime;
-                log.info({ code, durationMs, stdoutLen: stdout.length, stderrLen: stderr.length }, 'CLI exited');
-                if (stderr) {
-                    log.warn({ stderr: stderr.substring(0, 500) }, 'CLI stderr');
+            // Collect the final text response
+            let content = '';
+            for await (const message of conversation) {
+                if (message.type === 'assistant' && message.message?.content) {
+                    const msgContent = message.message.content;
+                    if (typeof msgContent === 'string') {
+                        content = msgContent;
+                    }
+                    else if (Array.isArray(msgContent)) {
+                        content = msgContent
+                            .filter((block) => block.type === 'text' && block.text)
+                            .map((block) => block.text)
+                            .join('');
+                    }
                 }
-                if (code !== 0 && !stdout) {
-                    log.error({ code, stderr: stderr.substring(0, 500) }, 'CLI failed');
-                    reject(new Error(`CLI exit ${code}: ${stderr}`));
-                    return;
-                }
-                // Log first 500 chars of output for debugging
-                log.debug({ output: stdout.substring(0, 500) }, 'CLI output preview');
-                const estimatedTokens = estimateTokensFromOutput(stdout);
-                resolve({
-                    content: stdout.trim(),
-                    model: request.model || request.agent.model,
-                    provider: (request.account?.provider || 'anthropic'),
-                    inputTokens: 0,
-                    outputTokens: estimatedTokens,
-                    tokensUsed: estimatedTokens,
-                    costUsd: 0, // CLI subscription — no per-request cost
-                    mode: 'full',
-                    sessionId: request.sessionId,
-                    durationMs,
-                });
-            });
-            child.on('error', (err) => {
-                clearTimeout(timeout);
-                reject(new Error(`Failed to start CLI: ${err.message}`));
-            });
-        });
+            }
+            const durationMs = Date.now() - startTime;
+            const estimatedTokens = estimateTokens(content);
+            log.info({ durationMs, contentLen: content.length }, 'SDK query completed');
+            return {
+                content: content.trim(),
+                model: request.model || request.agent.model,
+                provider: (request.account?.provider || 'anthropic'),
+                inputTokens: 0,
+                outputTokens: estimatedTokens,
+                tokensUsed: estimatedTokens,
+                costUsd: 0,
+                mode: 'full',
+                sessionId: undefined,
+                durationMs,
+            };
+        }
+        catch (err) {
+            const durationMs = Date.now() - startTime;
+            log.error({ err, durationMs }, 'SDK query failed');
+            throw new Error(`Claude SDK failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
-}
-function estimateTokensFromOutput(output) {
-    return Math.ceil(output.length / 3.5);
 }
 //# sourceMappingURL=cli-runner.js.map

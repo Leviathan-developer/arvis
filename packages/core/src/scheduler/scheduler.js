@@ -37,7 +37,7 @@ export class Scheduler {
         for (const task of dueHeartbeats) {
             // Flood guard: skip if a pending/running job already exists for this heartbeat
             const alreadyQueued = this.db.get(`SELECT id FROM queue WHERE agent_id = ? AND status IN ('pending', 'running')
-         AND json_extract(payload, '$.configId') = ? LIMIT 1`, task.agent_id, task.id);
+         AND CAST(json_extract(payload, '$.configId') AS INTEGER) = ? LIMIT 1`, task.agent_id, task.id);
             if (alreadyQueued) {
                 log.debug({ name: task.name, existingJobId: alreadyQueued.id }, 'Heartbeat skipped — already queued');
                 continue;
@@ -60,7 +60,7 @@ export class Scheduler {
         for (const task of dueCrons) {
             // Flood guard: skip if a pending/running job already exists for this cron
             const alreadyQueued = this.db.get(`SELECT id FROM queue WHERE agent_id = ? AND status IN ('pending', 'running')
-         AND json_extract(payload, '$.cronId') = ? LIMIT 1`, task.agent_id, task.id);
+         AND CAST(json_extract(payload, '$.cronId') AS INTEGER) = ? LIMIT 1`, task.agent_id, task.id);
             if (alreadyQueued) {
                 log.debug({ name: task.name, existingJobId: alreadyQueued.id }, 'Cron skipped — already queued');
                 continue;

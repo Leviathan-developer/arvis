@@ -282,7 +282,7 @@ function SubscriptionSpotlight() {
           </span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 64, alignItems: 'center' }}>
+        <div className="grid-2col grid-2col-gap64" style={{ gap: 64, alignItems: 'center' }}>
           {/* Left — Copy */}
           <div>
             <h2 style={{
@@ -301,7 +301,7 @@ function SubscriptionSpotlight() {
             </p>
 
             {/* Comparison */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 32 }}>
+            <div className="grid-2col" style={{ gap: 12, marginBottom: 32 }}>
               <div style={{
                 background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.15)',
                 borderRadius: 10, padding: '20px',
@@ -516,7 +516,7 @@ function WhyArvisSection() {
           <span className="text-gradient-purple">Start shipping agents.</span>
         </h2>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+        <div className="grid-2col" style={{ gap: 24 }}>
           {/* Without */}
           <div
             style={{

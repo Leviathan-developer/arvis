@@ -2,21 +2,34 @@ import CronParser from 'cron-parser';
 import type { ArvisDatabase } from '../db/database.js';
 import type { QueueManager } from '../queue/queue-manager.js';
 import type { HeartbeatConfigRow, CronJobRow } from '../db/schema.js';
+import type { MessageBus } from '../bus/message-bus.js';
+import { isScriptConfig, executeScript } from './script-runner.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('scheduler');
 
 /**
  * Runs periodic tasks — heartbeats and user-defined cron jobs.
- * Checks every 60 seconds for due tasks and enqueues them.
+ * Checks every 10 seconds for due tasks and enqueues them.
+ *
+ * Supports two heartbeat modes:
+ * - **LLM heartbeat** (default): enqueues a job for the agent to process via LLM
+ * - **Script heartbeat**: fetches a URL, formats output, posts directly. No LLM.
+ *   Only triggers the agent if a condition is met (e.g. price > threshold).
  */
 export class Scheduler {
   private interval: ReturnType<typeof setInterval> | null = null;
+  private bus: MessageBus | null = null;
 
   constructor(
     private db: ArvisDatabase,
     private queue: QueueManager,
   ) {}
+
+  /** Set the message bus for script heartbeats to post directly */
+  setBus(bus: MessageBus): void {
+    this.bus = bus;
+  }
 
   /** Start the scheduler. Uses 10s interval to support sub-minute schedules. */
   start(intervalMs = 10_000): void {
@@ -51,6 +64,13 @@ export class Scheduler {
     );
 
     for (const task of dueHeartbeats) {
+      // Check if this is a script heartbeat (no LLM needed)
+      const scriptConfig = isScriptConfig(task.run_condition);
+      if (scriptConfig && this.bus) {
+        this.runScriptHeartbeat(task, scriptConfig);
+        continue;
+      }
+
       // Flood guard: skip if a pending/running job already exists for this heartbeat
       const alreadyQueued = this.db.get<{ id: number }>(
         `SELECT id FROM queue WHERE agent_id = ? AND status IN ('pending', 'running')
@@ -120,6 +140,58 @@ export class Scheduler {
         crons: dueCrons.length,
       }, 'Scheduled tasks processed');
     }
+  }
+
+  /**
+   * Run a script heartbeat — fetch URL, format, post. No LLM.
+   * If condition matches, THEN fire the agent.
+   */
+  private runScriptHeartbeat(task: HeartbeatConfigRow, scriptConfig: import('./script-runner.js').ScriptConfig): void {
+    const nextRun = this.calculateNextRun(task.schedule);
+    this.db.run(
+      "UPDATE heartbeat_configs SET last_run = datetime('now'), next_run = ? WHERE id = ?",
+      nextRun, task.id,
+    );
+
+    // Run async — don't block the tick loop
+    executeScript(scriptConfig).then((result) => {
+      // Post the formatted message to channel (no LLM involved)
+      if (task.channel_id && task.platform && this.bus) {
+        this.bus.emit('send', {
+          channelId: task.channel_id,
+          platform: task.platform,
+          content: result.message,
+        });
+      }
+
+      // If condition triggered, enqueue an LLM job
+      if (result.triggerPrompt) {
+        this.queue.enqueue({
+          agentId: task.agent_id,
+          type: 'heartbeat',
+          payload: {
+            prompt: result.triggerPrompt,
+            channel: task.channel_id,
+            platform: task.platform,
+            configId: task.id,
+          },
+          priority: 5, // Higher priority — condition matched
+        });
+        log.info({ name: task.name }, 'Script condition triggered — agent job enqueued');
+      }
+
+      log.debug({ name: task.name, nextRun }, 'Script heartbeat executed');
+    }).catch((err) => {
+      log.error({ name: task.name, err }, 'Script heartbeat failed');
+      // Post error to channel so user knows
+      if (task.channel_id && task.platform && this.bus) {
+        this.bus.emit('send', {
+          channelId: task.channel_id,
+          platform: task.platform,
+          content: `Script error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    });
   }
 
   /** Calculate the next run time from a cron expression or interval shorthand */

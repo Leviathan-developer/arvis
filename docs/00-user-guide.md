@@ -3,6 +3,130 @@
 
 ---
 
+## Installation
+
+### Prerequisites
+- **Node.js 20+** (LTS recommended)
+- **Git**
+- A text editor
+
+### Windows
+
+```powershell
+# 1. Install Node.js 20+ from https://nodejs.org (LTS)
+# 2. Install Git from https://git-scm.com/download/win
+# 3. Install build tools for native modules (better-sqlite3)
+npm install -g windows-build-tools
+# OR: Install Visual Studio Build Tools with "C++ build tools" workload
+
+# 4. Clone and install
+git clone https://github.com/Arvis-agent/arvis
+cd arvis
+npm install
+
+# 5. Install Claude CLI (for CLI subscription accounts)
+npm install -g @anthropic-ai/claude-code
+
+# 6. Configure
+copy .env.example .env
+# Edit .env — add your Discord/Telegram bot tokens
+
+# 7. Add an LLM account (pick one):
+#    CLI subscription (uses your Claude Pro/Max sub):
+npm run add-account
+#    OR just add an API key to .env:
+#    ANTHROPIC_API_KEY=sk-ant-your-key
+
+# 8. Start core + dashboard
+npm start
+npm run dashboard
+```
+
+### macOS
+
+```bash
+# 1. Install Homebrew (if not installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 2. Install Node.js and Git
+brew install node@20 git
+
+# 3. Xcode Command Line Tools (for native modules)
+xcode-select --install
+
+# 4. Clone and install
+git clone https://github.com/Arvis-agent/arvis
+cd arvis && npm install
+
+# 5. Install Claude CLI (for CLI subscription accounts)
+npm install -g @anthropic-ai/claude-code
+
+# 6. Configure
+cp .env.example .env
+# Edit .env — add your Discord/Telegram bot tokens
+
+# 7. Add an LLM account (pick one):
+#    CLI subscription:
+npm run add-account
+#    OR just add an API key to .env:
+#    ANTHROPIC_API_KEY=sk-ant-your-key
+
+# 8. Start
+npm start
+npm run dashboard
+```
+
+### Linux (Ubuntu/Debian)
+
+```bash
+# 1. Install Node.js 20+ (via NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git build-essential python3
+
+# 2. Clone and install
+git clone https://github.com/Arvis-agent/arvis
+cd arvis && npm install
+
+# 3. Install Claude CLI (for CLI subscription accounts)
+npm install -g @anthropic-ai/claude-code
+
+# 4. Configure
+cp .env.example .env
+nano .env   # Add your Discord/Telegram bot tokens
+
+# 5. Add an LLM account (pick one):
+#    CLI subscription:
+npm run add-account
+#    OR just add an API key to .env:
+#    ANTHROPIC_API_KEY=sk-ant-your-key
+
+# 6. Start
+npm start
+npm run dashboard
+```
+
+### Docker (Easiest for VPS)
+
+```bash
+git clone https://github.com/Arvis-agent/arvis
+cd arvis
+cp .env.example .env
+# Edit .env — add bot tokens + at least one API key
+docker-compose up -d
+# Core + dashboard start together
+```
+
+> **Note:** Docker doesn't support CLI subscription accounts (they need a browser login). Use API keys instead, or set up CLI accounts on the host and mount `data/accounts/` into the container.
+
+### After Installation
+
+1. Open `http://localhost:5100` (dashboard)
+2. Go to Chat → talk to the Conductor
+3. Ask it to create your first agent
+4. Go to Settings to see your detected accounts
+
+---
+
 ## What Is Arvis?
 
 Arvis is your personal AI agent platform. Think of it like having a team of AI assistants — each one specialized for a different job — that you can talk to through Discord, Telegram, your browser, or any messaging app.
@@ -120,17 +244,44 @@ If not assigned, all messages go to the **Conductor** by default.
 
 You can use multiple AI services — Arvis automatically switches between them when one hits a rate limit.
 
-### Claude Max Subscription (CLI)
-This uses your Claude.ai subscription via the CLI tool. Cheaper than API for heavy use.
+### Option A: Claude CLI Subscription (Best Value)
 
-```env
-CLAUDE_CLI_HOME=/home/you/.claude
-# Add more accounts:
-CLAUDE_CLI_HOME_1=/home/work/.claude
-CLAUDE_CLI_HOME_2=/home/personal/.claude
+Uses your Claude Pro/Max subscription via the Claude CLI tool. No per-token cost — just your monthly subscription.
+
+**Step 1:** Install the Claude CLI globally:
+```bash
+npm install -g @anthropic-ai/claude-code
 ```
 
-### Anthropic API Key
+**Step 2:** Add an account:
+```bash
+npm run add-account
+# Or with a custom name:
+npm run add-account work
+npm run add-account personal
+```
+
+This opens a browser window — log in with your Claude account. Auth files are saved to `data/accounts/<name>/.claude/`. That's it.
+
+**Step 3:** There is no step 3. Arvis auto-detects all accounts in `data/accounts/` on startup. No `.env` changes needed.
+
+Want to add more accounts? Run `npm run add-account` again. Each account gets its own isolated auth — you can use different Claude subscriptions (work, personal, etc.).
+
+**How it works under the hood:**
+- `npm run add-account` creates `data/accounts/<name>/` and runs `claude auth login` with HOME pointed there
+- On startup, Arvis scans `data/accounts/` for directories containing `.claude/` auth files
+- Each discovered directory becomes a CLI subscription account
+- Accounts are named `cli-<dirname>` (e.g., `cli-acc1`, `cli-work`)
+
+**Advanced: Manual env var setup** (if you prefer):
+```env
+CLAUDE_CLI_HOME=/home/you/.claude
+CLAUDE_CLI_HOME_1=/path/to/another/.claude
+```
+
+### Option B: API Keys (Pay Per Token)
+
+#### Anthropic API
 ```env
 ANTHROPIC_API_KEY=sk-ant-your-key
 # Add more:
@@ -138,27 +289,41 @@ ANTHROPIC_API_KEY_1=sk-ant-key-one
 ANTHROPIC_API_KEY_2=sk-ant-key-two
 ```
 
-### OpenAI API Key
+#### OpenAI
 ```env
 OPENAI_API_KEY=sk-your-openai-key
 ```
 
-### OpenRouter (access many models with one key)
+#### OpenRouter (access many models with one key)
 ```env
 OPENROUTER_API_KEY=sk-or-your-key
 ```
 
-### Google Gemini
+#### Google Gemini
 ```env
 GOOGLE_API_KEY=AIza-your-key
 ```
 
-### Local AI (Ollama)
+#### Ollama (local, free)
 ```env
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-**Arvis handles rate limits automatically.** If one account hits a limit, it silently switches to the next available one. You never see an error message — it just keeps working.
+### Mixing Accounts
+
+You can use any combination. Example `.env`:
+```env
+# CLI subscription for heavy use (no per-token cost)
+# (auto-detected from data/accounts/ — no env var needed)
+
+# Cheap API key as fallback when CLI is rate-limited
+ANTHROPIC_API_KEY=sk-ant-your-key
+
+# Local model as last resort
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+**Arvis handles rate limits automatically.** If one account hits a limit, it silently switches to the next available one. You never see an error — it just keeps working.
 
 ---
 
@@ -183,7 +348,15 @@ Arvis checks: which accounts are available?
       → You still get a response, just a bit later
 ```
 
-**You never see "rate limit exceeded."** Arvis hides this completely.
+### What Happens When Rate-Limited?
+
+If ALL your accounts are rate-limited at the same time, Arvis tells you:
+
+> *"All AI accounts are rate-limited. Retrying automatically in ~2 minutes."*
+
+It retries with exponential backoff (2, 4, 8 minutes). You **will** get a response — just delayed. Once any account becomes available again, your message is processed automatically.
+
+**How to avoid this:** Add multiple accounts. Even 2 Claude CLI homes + 1 cheap API key (Anthropic haiku or OpenAI mini) means you'll almost never see this message.
 
 **Account memory:** When it switches accounts, the conversation history is rebuilt from the database. So even if account A was doing the conversation and account B takes over, it gets the full context. Nothing is lost.
 
@@ -286,6 +459,13 @@ Enable these per-agent in the Config tab:
 | `http_fetch` | Fetches a URL, strips HTML, returns text (3000 chars max) |
 | `calculate` | Safe math: `2^32`, `sqrt(144)`, `1234 * 5.67` |
 | `get_time` | Returns current date and time |
+| `get_variable` | Retrieve a stored variable/secret from the dashboard Variables settings |
+| `write_plugin` | Write an ESM plugin to plugins/ and auto-load it |
+| `list_plugins` | List all loaded plugin tools |
+| `delete_plugin` | Delete a plugin file |
+| `run_shell` | Run a shell command and capture output |
+| `read_file` | Read any file on the filesystem |
+| `write_file` | Write content to any file (creates dirs) |
 
 Enable them for an agent → they appear as available tools in the LLM prompt. The agent decides when to use them.
 
@@ -356,8 +536,23 @@ This is **fire-and-forget** — the conductor doesn't wait for results. Each sub
 - Permissions per channel: `full` or restricted
 - Each agent can only access channels it's been explicitly bound to
 
+### Tool Sandboxing
+Agents have power tools (`read_file`, `write_file`, `run_shell`, `write_plugin`) but they're sandboxed:
+- **Path validation**: `read_file` / `write_file` blocked outside the Arvis project directory. Blocks `.env`, `.sqlite`, `.ssh/`, `.pem`, `.key`, system dirs (`/etc/`, `C:\Windows\`)
+- **Shell blocklist**: `run_shell` blocks destructive commands — `rm -rf /`, `curl | bash`, `chmod 777`, `mkfs`, `shutdown`, `passwd`, fork bombs, etc.
+- **Plugin code validation**: `write_plugin` blocks `process.exit`, `child_process`, `eval()`, `new Function()` in plugin source
+- **Rate limiting**: Power tools limited to 20 calls per minute per tool (prevents runaway loops)
+- **Conductor self-protection**: Conductor cannot modify its own agent config via `[UPDATE_AGENT:conductor]`
+- **Schedule validation**: Scheduled tasks must have ≥ 30-second intervals (prevents queue flooding)
+
+### WebSocket / Web Connector Security
+- CORS restricted to localhost origins by default (configurable via `allowedOrigins`)
+- API key required for both REST and WebSocket auth when `config.apiKey` is set
+- Timing-safe comparison on all API key checks (prevents timing attacks)
+- File upload filenames sanitized via `path.basename()` + regex
+
 ### What Arvis Does NOT Have (compared to OpenClaw)
-- **No Docker sandboxing** — agents run with your user's full permissions
+- **No Docker sandboxing** — agents run with your user's permissions (but tools are sandboxed, see above)
 - **No cryptographic device identity** — simpler JWT cookie auth
 - This is intentional: Arvis is a homeserver/personal platform. You trust your own agents.
 
@@ -398,11 +593,14 @@ This is **fire-and-forget** — the conductor doesn't wait for results. Each sub
 ## Quick Start Checklist
 
 ```
+□ Clone the repo and run npm install
 □ Copy .env.example to .env
-□ Add at least one LLM account (API key or CLI_HOME)
-□ Add at least one platform bot token (Discord or Telegram)
-□ Start Arvis: node src/main.ts
-□ Start Dashboard: npm run dev (packages/dashboard)
+□ Add an LLM account:
+    CLI subscription: npm run add-account
+    OR API key: add ANTHROPIC_API_KEY to .env
+□ Add a platform bot token (Discord or Telegram) to .env
+□ Start Arvis Core:    npm start
+□ Start Dashboard:     npm run dashboard
 □ Open http://localhost:5100
 □ Go to Chat → talk to the Conductor
 □ Ask Conductor to create your first sub-agent

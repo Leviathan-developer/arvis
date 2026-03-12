@@ -75,7 +75,11 @@ export function createGoogleAdapter(request: RunRequest): { adapter: ProviderAda
       if (!response.ok) {
         const errorText = await response.text();
         if (response.status === 429) {
-          throw new RateLimitError(`Google rate limited: ${errorText}`, new Date(Date.now() + 60_000));
+          const retryAfter = response.headers.get('retry-after');
+          const retryDate = retryAfter
+            ? new Date(Date.now() + parseInt(retryAfter, 10) * 1000)
+            : new Date(Date.now() + 60_000);
+          throw new RateLimitError(`Google rate limited: ${errorText}`, retryDate);
         }
         throw new Error(`Google API error (${response.status}): ${errorText}`);
       }

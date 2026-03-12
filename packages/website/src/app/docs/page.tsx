@@ -118,6 +118,15 @@ const DOCS: {
     tag: 'API',
     tagColor: '#22c55e',
   },
+  {
+    num: '13',
+    title: 'First agent tutorial',
+    desc: 'Step-by-step: build a Bitcoin price monitor from scratch.',
+    slug: '13-first-agent-tutorial',
+    icon: <BookIcon size={20} />,
+    tag: 'Tutorial',
+    tagColor: '#f59e0b',
+  },
 ];
 
 export default function DocsPage() {

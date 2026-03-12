@@ -1,8 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from '../logger.js';
+import type { VariableManager } from '../variables/variable-manager.js';
 
 const log = createLogger('tools');
+
+// ─── Variable manager injection ─────────────────────────────────────────────
+
+let _variableManager: VariableManager | null = null;
+
+/** Set the VariableManager instance so the get_variable tool can access it */
+export function setVariableManager(vm: VariableManager): void {
+  _variableManager = vm;
+}
 
 // ─── Tool schema (provider-agnostic) ─────────────────────────────────────────
 
@@ -131,6 +141,17 @@ export const BUILT_IN_TOOLS: ToolDefinition[] = [
         content: { type: 'string', description: 'Content to write to the file' },
       },
       required: ['file_path', 'content'],
+    },
+  },
+  {
+    name: 'get_variable',
+    description: 'Retrieve a stored variable or secret by key. Use this to access API keys, webhook URLs, tokens, and other configuration stored in the dashboard Variables settings.',
+    parameters: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'The variable key to look up (case-sensitive)' },
+      },
+      required: ['key'],
     },
   },
 ];
@@ -306,6 +327,105 @@ export function getEnabledTools(allowedNames: string[]): ToolDefinition[] {
   return [...builtIn, ...plugins];
 }
 
+// ─── Security helpers ─────────────────────────────────────────────────────────
+
+const ARVIS_ROOT = process.cwd();
+
+const BLOCKED_PATH_PATTERNS = [
+  /\.env/i,
+  /\.sqlite/i,
+  /\.db$/i,
+  /\.ssh[/\\]/i,
+  /\.git[/\\]credentials/i,
+  /\.git[/\\]config/i,
+  /id_rsa/i,
+  /id_ed25519/i,
+  /\.pem$/i,
+  /\.key$/i,
+];
+
+const BLOCKED_DIR_PREFIXES_UNIX = ['/etc/', '/proc/', '/sys/', '/root/'];
+const BLOCKED_DIR_PREFIXES_WIN = ['c:\\windows\\', 'c:\\program files\\', 'c:\\programdata\\'];
+
+function validateToolPath(filePath: string): void {
+  const resolved = path.resolve(ARVIS_ROOT, filePath);
+  const normalised = resolved.replace(/\\/g, '/').toLowerCase();
+  const rootNorm = ARVIS_ROOT.replace(/\\/g, '/').toLowerCase();
+
+  // Must be inside Arvis root
+  if (!normalised.startsWith(rootNorm)) {
+    throw new Error(`Path blocked — must be inside the Arvis project directory`);
+  }
+
+  // Block sensitive file patterns
+  for (const pattern of BLOCKED_PATH_PATTERNS) {
+    if (pattern.test(resolved)) {
+      throw new Error(`Path blocked — access to this file type is restricted`);
+    }
+  }
+
+  // Block system directories
+  const prefixes = process.platform === 'win32' ? BLOCKED_DIR_PREFIXES_WIN : BLOCKED_DIR_PREFIXES_UNIX;
+  for (const prefix of prefixes) {
+    if (normalised.startsWith(prefix)) {
+      throw new Error(`Path blocked — system directories are restricted`);
+    }
+  }
+}
+
+const BLOCKED_SHELL_PATTERNS = [
+  /rm\s+(-\w*r\w*\s+(-\w*f\w*\s+)?|(-\w*f\w*\s+)?-\w*r\w*\s+)(\/|\~|\.\.)/i,      // rm -rf / ~ ..
+  /(curl|wget)\s+.*\|\s*(bash|sh|python|node|perl|ruby)/i,                            // curl | bash
+  /chmod\s+777/i,                                                                      // chmod 777
+  /mkfs\./i,                                                                           // mkfs.*
+  /\bdd\s+if=/i,                                                                       // dd if=
+  /\b(shutdown|reboot|halt|init\s+[06])\b/i,                                           // shutdown/reboot
+  /\b(passwd|useradd|userdel|usermod|groupadd|visudo)\b/i,                             // auth modification
+  />\s*\/dev\/sd[a-z]/i,                                                               // write to block device
+  /:(){ :\|:& };:/,                                                                    // fork bomb
+  /\bformat\s+[a-z]:/i,                                                                // Windows format drive
+];
+
+function validateShellCommand(command: string): void {
+  for (const pattern of BLOCKED_SHELL_PATTERNS) {
+    if (pattern.test(command)) {
+      throw new Error(`Command blocked — contains a restricted operation`);
+    }
+  }
+}
+
+const RATE_LIMIT_MAX = 20;  // max calls per minute
+const RATE_LIMIT_WINDOW = 60_000;
+const _rateLimitMap = new Map<string, number[]>();
+
+function checkRateLimit(tool: string): void {
+  const now = Date.now();
+  const timestamps = _rateLimitMap.get(tool) || [];
+  const recent = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW);
+  if (recent.length >= RATE_LIMIT_MAX) {
+    throw new Error(`Rate limited — ${tool} can be called at most ${RATE_LIMIT_MAX} times per minute`);
+  }
+  recent.push(now);
+  _rateLimitMap.set(tool, recent);
+}
+
+const BLOCKED_PLUGIN_PATTERNS = [
+  /\bprocess\.exit\b/,
+  /\brequire\s*\(\s*['"]child_process['"]\s*\)/,
+  /\bfrom\s+['"]child_process['"]/,
+  /\beval\s*\(/,
+  /\bnew\s+Function\s*\(/,
+  /\bprocess\.kill\s*\(/,
+];
+
+function validatePluginCode(code: string): void {
+  for (const pattern of BLOCKED_PLUGIN_PATTERNS) {
+    if (pattern.test(code)) {
+      throw new Error(`Plugin code blocked — contains a restricted pattern: ${pattern.source}`);
+    }
+  }
+}
+
 // ─── Tool executor ────────────────────────────────────────────────────────────
 
 export class ToolExecutor {
@@ -328,6 +448,7 @@ export class ToolExecutor {
         case 'run_shell':    return await this.runShell(String(input.command ?? ''), Number(input.timeout_ms ?? 30_000));
         case 'read_file':    return await this.readFileContents(String(input.file_path ?? ''), Number(input.max_chars ?? 8_000));
         case 'write_file':   return await this.writeFileContents(String(input.file_path ?? ''), String(input.content ?? ''));
+        case 'get_variable': return this.getVariable(String(input.key ?? ''));
         default:             throw new Error(`Unknown tool: ${name}`);
       }
     } catch (err) {
@@ -443,6 +564,9 @@ export class ToolExecutor {
     if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
       throw new Error('Plugin name must be alphanumeric with hyphens/underscores only');
     }
+    checkRateLimit('write_plugin');
+    validatePluginCode(code);
+
     const pluginsDir = path.join(process.cwd(), 'plugins');
     await fs.promises.mkdir(pluginsDir, { recursive: true });
     const filePath = path.join(pluginsDir, `${name}.js`);
@@ -451,7 +575,12 @@ export class ToolExecutor {
     // Import with cache-bust so re-writing the same plugin name reloads it
     const { pathToFileURL } = await import('url');
     const fileUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}`;
-    await import(fileUrl);
+    try {
+      await import(fileUrl);
+    } catch (err) {
+      log.warn({ name, error: err }, 'Plugin import failed — file saved but not loaded');
+      return `Plugin "${name}" written to plugins/${name}.js but failed to load: ${err instanceof Error ? err.message : String(err)}`;
+    }
 
     const toolsBefore = _pluginTools.size;
     // Give import a tick to register tools
@@ -485,6 +614,8 @@ export class ToolExecutor {
 
   private async runShell(command: string, timeoutMs = 30_000): Promise<string> {
     if (!command.trim()) throw new Error('Empty command');
+    validateShellCommand(command);
+    checkRateLimit('run_shell');
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
@@ -502,6 +633,7 @@ export class ToolExecutor {
 
   private async readFileContents(filePath: string, maxChars = 8_000): Promise<string> {
     if (!filePath) throw new Error('No file path provided');
+    validateToolPath(filePath);
     const resolved = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
     const content = await fs.promises.readFile(resolved, 'utf-8');
     if (content.length > maxChars) return content.slice(0, maxChars) + `\n... [truncated at ${maxChars} chars]`;
@@ -510,10 +642,20 @@ export class ToolExecutor {
 
   private async writeFileContents(filePath: string, content: string): Promise<string> {
     if (!filePath) throw new Error('No file path provided');
+    validateToolPath(filePath);
+    checkRateLimit('write_file');
     const resolved = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
     await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
     await fs.promises.writeFile(resolved, content, 'utf-8');
     log.info({ path: resolved }, 'File written by agent');
     return `File written: ${resolved}`;
+  }
+
+  private getVariable(key: string): string {
+    if (!key.trim()) throw new Error('No key provided');
+    if (!_variableManager) throw new Error('Variable store not initialized');
+    const value = _variableManager.get(key);
+    if (value === null) return `Variable "${key}" not found. Available variables can be managed in the dashboard Settings → Variables section.`;
+    return value;
   }
 }

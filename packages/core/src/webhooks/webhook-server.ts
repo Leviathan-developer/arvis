@@ -52,9 +52,12 @@ export class WebhookServer {
       return;
     }
 
+    // Parse pathname to ignore query string
+    const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname;
+
     const webhook = this.db.get<WebhookRow>(
       'SELECT * FROM webhooks WHERE path = ? AND enabled = 1',
-      req.url,
+      pathname,
     );
 
     if (!webhook) {

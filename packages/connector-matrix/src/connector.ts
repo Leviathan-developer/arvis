@@ -228,6 +228,54 @@ export class MatrixConnector {
         }
       }
     }
+
+    // Send files as media messages
+    if (msg.files?.length) {
+      for (const file of msg.files) {
+        const buffer = typeof file.data === 'string' ? Buffer.from(file.data) : file.data;
+        const ct = file.contentType || 'application/octet-stream';
+        const mxcUri = await this.uploadMedia(buffer, file.name, ct);
+        if (!mxcUri) continue;
+
+        const msgtype = ct.startsWith('image/') ? 'm.image'
+          : ct.startsWith('audio/') ? 'm.audio'
+          : ct.startsWith('video/') ? 'm.video'
+          : 'm.file';
+
+        const txnId = crypto.randomUUID();
+        await this.matrixRequest(
+          'PUT',
+          `/_matrix/client/v3/rooms/${roomId}/send/m.room.message/${txnId}`,
+          undefined,
+          {
+            msgtype,
+            body: file.name,
+            url: mxcUri,
+            info: { mimetype: ct, size: buffer.length },
+          },
+        );
+      }
+    }
+  }
+
+  /** Upload a file to the Matrix media repository and return the mxc:// URI */
+  private async uploadMedia(data: Buffer, filename: string, contentType: string): Promise<string | null> {
+    try {
+      const url = `${this.config.homeserverUrl}/_matrix/media/v3/upload?filename=${encodeURIComponent(filename)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.accessToken}`,
+          'Content-Type': contentType,
+        },
+        body: new Uint8Array(data),
+      });
+      if (!response.ok) return null;
+      const result = await response.json() as { content_uri?: string };
+      return result.content_uri ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Make a request to the Matrix Client-Server API */

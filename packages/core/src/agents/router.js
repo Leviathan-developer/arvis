@@ -8,6 +8,8 @@ export class Router {
     registry;
     bus;
     config;
+    /** Cached mention RegExp patterns keyed by agent name — avoids recompiling on every message */
+    mentionPatterns = new Map();
     constructor(registry, bus, config) {
         this.registry = registry;
         this.bus = bus;
@@ -17,26 +19,41 @@ export class Router {
      * Determines which agent should handle this message.
      *
      * Logic:
+     * 0. Bot has assigned agent (bot_instances.agent_id) -> route there (active only)
      * 1. Channel is bound to an agent -> route there
      * 2. Message mentions an agent by name -> route there
      * 3. Message is in conductor channel -> route to conductor
-     * 4. Message is a DM (channelId starts with "dm-") -> route to conductor
-     * 5. No match -> return null (ignore)
+     * 4. Dashboard direct channel (dashboard-agent-{id}) -> route to that agent
+     * 5. Message is a DM (channelId starts with "dm-") -> route to conductor
+     * 6. Bot has assigned agent but inactive at step 0 -> route there anyway
+     * 7. Fall back to conductor (bot is in this channel, user expects a reply)
+     * 8. No match -> return null (ignore)
      */
     route(msg) {
+        // 0. Bot assignment — direct routing from bot_instances.agent_id (highest priority)
+        const assignedId = msg.metadata?.assignedAgentId;
+        if (assignedId != null) {
+            const assigned = this.registry.getById(Number(assignedId));
+            if (assigned && assigned.status === 'active') {
+                log.debug({ agent: assigned.slug, reason: 'bot_assignment' }, 'Routed message');
+                return assigned;
+            }
+        }
         // 1. Channel binding
         const byChannel = this.registry.getByChannel(msg.platform, msg.channelId);
         if (byChannel && byChannel.status === 'active') {
             log.debug({ agent: byChannel.slug, reason: 'channel_binding' }, 'Routed message');
             return byChannel;
         }
-        // 2. Agent mention by name
+        // 2. Agent mention by name (use cached RegExp to avoid re-compiling on every message)
         const agents = this.registry.getAll();
         for (const agent of agents) {
             if (agent.status !== 'active')
                 continue;
-            const mentionPattern = new RegExp(`@${agent.name}\\b`, 'i');
-            if (mentionPattern.test(msg.content)) {
+            if (!this.mentionPatterns.has(agent.name)) {
+                this.mentionPatterns.set(agent.name, new RegExp(`@${agent.name}\\b`, 'i'));
+            }
+            if (this.mentionPatterns.get(agent.name).test(msg.content)) {
                 log.debug({ agent: agent.slug, reason: 'mention' }, 'Routed message');
                 return agent;
             }
@@ -53,7 +70,18 @@ export class Router {
                 return null;
             }
         }
-        // 4. DM -> conductor
+        // 4. Dashboard direct channel — route to the specific agent (bypasses conductor DM fallback)
+        if (msg.channelId.startsWith('dashboard-agent-')) {
+            const agentId = parseInt(msg.channelId.slice('dashboard-agent-'.length), 10);
+            if (!isNaN(agentId)) {
+                const agent = this.registry.getById(agentId);
+                if (agent && agent.status === 'active') {
+                    log.debug({ agent: agent.slug, reason: 'dashboard_direct' }, 'Routed message');
+                    return agent;
+                }
+            }
+        }
+        // 5. DM -> conductor
         if (msg.channelId.startsWith('dm-') || msg.metadata?.isDM) {
             try {
                 const conductor = this.registry.getConductor();
@@ -64,7 +92,26 @@ export class Router {
                 return null;
             }
         }
-        // 5. No match
+        // 6. Bot has an assigned agent but it wasn't active at step 0 — retry without status check
+        //    This handles guild channels where the bot is assigned to an agent
+        if (assignedId != null) {
+            const assigned = this.registry.getById(Number(assignedId));
+            if (assigned) {
+                log.debug({ agent: assigned.slug, reason: 'bot_assignment_fallback' }, 'Routed message');
+                return assigned;
+            }
+        }
+        // 7. Bot has no agent assignment — fall back to conductor for any message the bot received
+        //    (bot is listening in this channel, so someone expects a response)
+        try {
+            const conductor = this.registry.getConductor();
+            log.debug({ channelId: msg.channelId, platform: msg.platform, reason: 'conductor_fallback' }, 'Routed message');
+            return conductor;
+        }
+        catch {
+            // No conductor — truly no match
+        }
+        // 8. No match
         log.debug({ channelId: msg.channelId, platform: msg.platform }, 'No agent matched, ignoring');
         return null;
     }

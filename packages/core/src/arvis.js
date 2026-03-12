@@ -2,6 +2,9 @@ import { loadConfig } from './config.js';
 import { ArvisDatabase } from './db/database.js';
 import initialMigration from './db/migrations/001-initial.js';
 import multiProviderMigration from './db/migrations/002-multi-provider.js';
+import botInstancesMigration from './db/migrations/003-bot-instances.js';
+import variablesMigration from './db/migrations/004-variables.js';
+import { ConnectorManager } from './connectors/connector-manager.js';
 import { MessageBus } from './bus/message-bus.js';
 import { AgentRegistry } from './agents/agent-registry.js';
 import { Router } from './agents/router.js';
@@ -13,15 +16,28 @@ import { AgentRunner } from './runner/agent-runner.js';
 import { CLIRunner } from './runner/cli-runner.js';
 import { ProviderRunner } from './runner/provider-runner.js';
 import { AccountManager } from './runner/account-manager.js';
+import { RateLimitError } from './runner/types.js';
 import { QueueManager } from './queue/queue-manager.js';
 import { Scheduler } from './scheduler/scheduler.js';
 import { WebhookServer } from './webhooks/webhook-server.js';
 import { BillingManager } from './billing/billing-manager.js';
 import { SkillLoader } from './skills/skill-loader.js';
 import { SkillInjector } from './skills/skill-injector.js';
+import { parseDelegations, stripDelegations } from './agents/delegation-parser.js';
+import { BUILT_IN_TOOL_NAMES, setVariableManager } from './tools/tool-executor.js';
+import { VariableManager } from './variables/variable-manager.js';
+import { loadPlugins } from './plugins/plugin-loader.js';
+import { assertJobPayload } from './queue/types.js';
 import { createLogger } from './logger.js';
 import path from 'path';
+import fs from 'fs';
 const log = createLogger('arvis');
+/** True if an attachment is an image (by MIME type or file extension) */
+function isImage(att) {
+    if (att.contentType)
+        return att.contentType.startsWith('image/');
+    return /\.(jpe?g|png|gif|webp|bmp)$/i.test(att.filename);
+}
 /** Safely extract a string from an unknown value */
 function asString(val, fallback = '') {
     return typeof val === 'string' ? val : fallback;
@@ -48,10 +64,15 @@ export class Arvis {
     skillLoader;
     skillInjector;
     accountManager;
+    connectorManager;
+    variableManager;
+    backupInterval = null;
     constructor(configPath) {
         this.config = loadConfig(configPath);
         this.db = new ArvisDatabase(this.config);
         this.bus = new MessageBus();
+        // Run migrations before anything else touches the DB
+        this.db.migrate([initialMigration, multiProviderMigration, botInstancesMigration, variablesMigration]);
         // Initialize all components
         this.registry = new AgentRegistry(this.db);
         this.router = new Router(this.registry, this.bus, this.config);
@@ -70,18 +91,23 @@ export class Arvis {
         const skillsDir = path.join(process.cwd(), 'skills');
         this.skillLoader = new SkillLoader(skillsDir, this.db);
         this.skillInjector = new SkillInjector(this.db);
+        this.connectorManager = new ConnectorManager(this.db, this.bus);
+        this.variableManager = new VariableManager(this.db);
     }
     /** Start the Arvis platform */
     async start() {
-        // 1. Run database migrations
-        this.db.migrate([initialMigration, multiProviderMigration]);
+        // 1. Wire variable manager into tool executor
+        setVariableManager(this.variableManager);
         // 2. Sync accounts from config
         this.accountManager.syncFromConfig(this.config.accounts);
         // 3. Ensure Conductor agent exists
         this.ensureConductor();
-        // 4. Load skills
+        // 4. Load plugins (custom tools, connectors, etc.)
+        const pluginsDir = path.join(process.cwd(), 'plugins');
+        await loadPlugins(pluginsDir);
+        // 5. Load skills
         this.skillLoader.loadAll();
-        // 5. Wire up the message pipeline
+        // 6. Wire up the message pipeline
         this.bus.on('message', async (msg) => {
             try {
                 await this.handleMessage(msg);
@@ -116,11 +142,40 @@ export class Arvis {
         if (this.config.webhook.port) {
             this.webhookServer.start(this.config.webhook.port);
         }
+        // 10. Schedule daily DB backup (runs once immediately then every 24h)
+        this.runBackup();
+        this.backupInterval = setInterval(() => this.runBackup(), 24 * 60 * 60_000);
         log.info('Arvis is online.');
+    }
+    /** Create a timestamped backup, keep last 7 */
+    async runBackup() {
+        try {
+            const backupDir = path.join(this.config.dataDir, 'backups');
+            if (!fs.existsSync(backupDir))
+                fs.mkdirSync(backupDir, { recursive: true });
+            const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+            const dest = path.join(backupDir, `arvis-${stamp}.db`);
+            await this.db.backup(dest);
+            // Prune: keep only the 7 most recent backups
+            const files = fs.readdirSync(backupDir)
+                .filter(f => f.startsWith('arvis-') && f.endsWith('.db'))
+                .sort()
+                .reverse();
+            for (const old of files.slice(7)) {
+                fs.unlinkSync(path.join(backupDir, old));
+            }
+        }
+        catch (err) {
+            log.error({ err }, 'DB backup failed');
+        }
     }
     /** Stop the Arvis platform gracefully */
     async stop() {
         log.info('Shutting down...');
+        if (this.backupInterval) {
+            clearInterval(this.backupInterval);
+            this.backupInterval = null;
+        }
         this.queue.stop();
         this.scheduler.stop();
         // Drain in-flight jobs (max 30s wait)
@@ -133,6 +188,7 @@ export class Arvis {
             this.db.run("UPDATE queue SET status = 'failed', error = 'Shutdown timeout' WHERE status = 'running'");
             log.warn({ count: this.queue.activeJobs }, 'Force-killed running jobs on shutdown');
         }
+        await this.connectorManager.stopAll();
         await this.webhookServer.stop();
         this.db.close();
         log.info('Arvis shut down cleanly.');
@@ -151,8 +207,8 @@ export class Arvis {
         this.bus.emit('typing', { channelId: msg.channelId, platform: msg.platform });
         // 4. Get/create conversation
         const conversation = this.conversationManager.getOrCreate(agent.id, msg.platform, msg.channelId, msg.userId, msg.userName);
-        // 5. Store user message
-        this.conversationManager.addMessage(conversation.id, 'user', msg.content);
+        // 5. Store user message (capture ID so we can skip it in the history loop below)
+        const userMsg = this.conversationManager.addMessage(conversation.id, 'user', msg.content);
         // 6. Check if compaction needed (model-aware threshold)
         const compactionThreshold = this.contextBuilder.getCompactionThreshold(agent.model);
         if (this.conversationManager.shouldCompact(conversation.id, compactionThreshold)) {
@@ -197,17 +253,41 @@ ${text}`,
             historyParts.push(`[Previous conversation summary]\n${context.summaryText}\n`);
         }
         for (const m of context.messages) {
-            // Skip the current message (it's already in context.messages as the last user msg)
-            if (m.content === msg.content && m.role === 'user')
+            // Skip the message we just stored (avoid duplicating it at the end)
+            if (m.id === userMsg.id)
                 continue;
             historyParts.push(`[${m.role}]: ${m.content}`);
         }
         const fullPrompt = historyParts.length > 0
             ? `${historyParts.join('\n')}\n\n[user]: ${msg.content}`
             : msg.content;
-        // 9. Determine priority
+        // 9. Collect images from attachments for vision-capable models
+        const images = [];
+        if (msg.attachments) {
+            for (const att of msg.attachments) {
+                if (!isImage(att))
+                    continue;
+                if (att.data) {
+                    // Pre-fetched by connector (Telegram, WhatsApp)
+                    images.push({ base64: att.data, mimeType: att.contentType || 'image/jpeg' });
+                }
+                else if (att.url.startsWith('http')) {
+                    // Real URL (Discord CDN) — download now
+                    try {
+                        const res = await fetch(att.url);
+                        if (res.ok) {
+                            const mimeType = res.headers.get('content-type') || 'image/jpeg';
+                            const buf = Buffer.from(await res.arrayBuffer());
+                            images.push({ base64: buf.toString('base64'), mimeType });
+                        }
+                    }
+                    catch { /* Skip failed downloads */ }
+                }
+            }
+        }
+        // 10. Determine priority
         const priority = this.calculatePriority(msg, agent);
-        // 10. Enqueue
+        // 11. Enqueue
         this.queue.enqueue({
             agentId: agent.id,
             type: 'message',
@@ -218,6 +298,7 @@ ${text}`,
                 channelId: msg.channelId,
                 platform: msg.platform,
                 messageId: msg.id,
+                images: images.length > 0 ? images : undefined,
             },
             priority,
         });
@@ -236,8 +317,9 @@ ${text}`,
         await this.handleMessage(syntheticMsg);
     }
     async processJob(job) {
+        assertJobPayload(job.payload);
         const payload = job.payload;
-        const agent = this.registry.getAll().find(a => a.id === job.agentId);
+        const agent = this.registry.getById(job.agentId);
         if (!agent)
             throw new Error(`Agent ${job.agentId} not found`);
         const prompt = asString(payload.prompt);
@@ -260,17 +342,49 @@ ${text}`,
         catch (err) {
             log.warn({ err }, 'Failed to inject skills');
         }
+        // Scheduled jobs (heartbeat/cron): force terse, no-explanation mode.
+        // The agent must execute and post the result only — no tutorials, no asking
+        // questions, no explaining what tools to use, no listing "options".
+        // If truly blocked (missing API key, network error), post a single short error line.
+        if (job.type === 'heartbeat' || job.type === 'cron') {
+            const scheduledPrefix = `SCHEDULED TASK — EXECUTE ONLY.
+Do NOT ask questions. Do NOT explain what you are doing. Do NOT list options or instructions.
+Do NOT mention plugins, tools, or code files. Do NOT say you "created" anything.
+Just execute the task and post the result as a short message (1-3 lines max).
+If you cannot complete the task, post a single line: "Error: [reason]" — nothing else.\n\n`;
+            enrichedSystemPrompt = scheduledPrefix + (enrichedSystemPrompt || '');
+        }
+        // Determine which built-in tools to enable for this agent
+        const agentTools = (agent.allowedTools || []).filter(t => BUILT_IN_TOOL_NAMES.includes(t));
+        // CLI runs are stateless (--no-session-persistence) — use Arvis root as CWD
+        // so the workspace is already trusted by Claude CLI.
+        const sessionPath = undefined;
         let result;
         try {
             result = await this.runner.execute({
                 prompt,
                 agent,
                 systemPrompt: enrichedSystemPrompt,
+                images: payload.images,
+                tools: agentTools.length > 0 ? agentTools : undefined,
+                projectPath: sessionPath,
             });
             log.info({ jobId: job.id, contentLength: result.content.length, mode: result.mode, contentPreview: result.content.substring(0, 300) }, 'Runner returned');
         }
         catch (err) {
             log.error({ jobId: job.id, err }, 'Runner failed');
+            // Send rate-limit feedback to user so they know what's happening
+            const feedbackChannel = payload.channelId || payload.channel;
+            const feedbackPlatform = payload.platform;
+            if (err instanceof RateLimitError && feedbackChannel && feedbackPlatform) {
+                const attempts = job.attempts || 0;
+                const retryMinutes = Math.pow(2, attempts + 1);
+                this.bus.emit('send', {
+                    channelId: String(feedbackChannel),
+                    platform: String(feedbackPlatform),
+                    content: `All AI accounts are rate-limited. Retrying automatically in ~${retryMinutes} minutes.`,
+                });
+            }
             throw err;
         }
         // Parse memory tags
@@ -317,10 +431,33 @@ ${text}`,
                 }
             }
         }
-        // Strip tags from response
-        const cleanResponse = this.memoryManager.stripTags(agent.role === 'conductor'
+        // Handle delegation markers — spawn sub-jobs for other agents
+        const delegations = parseDelegations(result.content);
+        for (const delegation of delegations) {
+            const targetAgent = this.registry.getBySlug(delegation.agentSlug);
+            if (!targetAgent) {
+                log.warn({ slug: delegation.agentSlug }, 'Delegation target agent not found');
+                continue;
+            }
+            const targetChannel = payload.channelId || payload.channel;
+            const targetPlatform = payload.platform;
+            this.queue.enqueue({
+                agentId: targetAgent.id,
+                type: 'message',
+                payload: {
+                    prompt: delegation.task,
+                    channelId: targetChannel,
+                    platform: targetPlatform,
+                    // No conversationId — starts a fresh context for the sub-task
+                },
+                priority: 4, // Slightly below normal user messages
+            });
+            log.info({ fromAgent: agent.slug, toAgent: delegation.agentSlug, task: delegation.task.substring(0, 100) }, 'Delegation spawned');
+        }
+        // Strip tags from response (memory tags, conductor actions, delegation markers)
+        const cleanResponse = this.memoryManager.stripTags(stripDelegations(agent.role === 'conductor'
             ? this.conductorParser.stripActions(result.content)
-            : result.content);
+            : result.content));
         // Store assistant message
         if (payload.conversationId) {
             this.conversationManager.addMessage(payload.conversationId, 'assistant', cleanResponse);
@@ -350,23 +487,31 @@ ${text}`,
         return 5;
     }
     ensureConductor() {
+        // Already have a conductor by role — nothing to do
         try {
             this.registry.getConductor();
+            return;
         }
-        catch {
-            this.registry.create({
-                slug: 'conductor',
-                name: 'Conductor',
-                role: 'conductor',
-                description: 'Main agent — manages all other agents and system configuration',
-                allowedTools: ['Bash(*)', 'Read', 'Write', 'Edit'],
-                systemPrompt: CONDUCTOR_SYSTEM_PROMPT,
-                channels: this.config.discord.conductorChannel
-                    ? [{ platform: 'discord', channelId: this.config.discord.conductorChannel, isPrimary: true, permissions: 'full' }]
-                    : [],
-            });
-            log.info('Conductor agent created');
+        catch { /* no conductor by role */ }
+        // Slug exists but wrong role (e.g. leftover from previous run) — fix role in-place
+        const existing = this.registry.getBySlug('conductor');
+        if (existing) {
+            this.registry.update('conductor', { role: 'conductor' });
+            log.info('Conductor agent role corrected');
+            return;
         }
+        this.registry.create({
+            slug: 'conductor',
+            name: 'Conductor',
+            role: 'conductor',
+            description: 'Main agent — manages all other agents and system configuration',
+            allowedTools: ['Bash(*)', 'Read', 'Write', 'Edit'],
+            systemPrompt: CONDUCTOR_SYSTEM_PROMPT,
+            channels: this.config.discord.conductorChannel
+                ? [{ platform: 'discord', channelId: this.config.discord.conductorChannel, isPrimary: true, permissions: 'full' }]
+                : [],
+        });
+        log.info('Conductor agent created');
     }
 }
 //# sourceMappingURL=arvis.js.map

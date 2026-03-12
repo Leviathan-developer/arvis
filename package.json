@@ -1,6 +1,6 @@
 {
   "name": "arvis",
-  "version": "3.0.0",
+  "version": "3.3.2",
   "private": true,
   "type": "module",
   "description": "Self-hosted AI agent platform",
@@ -21,21 +21,16 @@
     "arvis": "src/cli.ts"
   },
   "scripts": {
-    "build": "npm run build --workspaces",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
-    "setup": "tsx scripts/setup.ts",
     "start": "tsx src/cli.ts",
-    "dev": "tsx watch src/main.ts",
-    "migrate": "tsx scripts/migrate.ts",
-    "lint": "eslint . --ext .ts",
-    "format": "prettier --write \"**/*.ts\"",
+    "dev": "tsx watch src/cli.ts",
     "dashboard": "npm run dev --workspace=packages/dashboard",
+    "test": "vitest run",
+    "build": "npm run build --workspaces",
+    "typecheck": "tsc --noEmit",
     "dashboard:build": "npm run build --workspace=packages/dashboard",
     "website": "npm run dev --workspace=packages/website",
-    "website:build": "npm run build --workspace=packages/website"
+    "website:build": "npm run build --workspace=packages/website",
+    "add-account": "tsx scripts/add-account.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
@@ -50,5 +45,8 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.3"
+  }
 }

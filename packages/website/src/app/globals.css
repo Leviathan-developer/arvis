@@ -315,8 +315,18 @@
 .docs-nav-link { transition: color 0.15s, background 0.15s; }
 .docs-nav-link:hover { color: #e4e4e7 !important; background: rgba(255,255,255,0.04) !important; }
 
+/* ── Responsive grids ─────────────────────────────────────── */
+.grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
 /* hide sidebar on mobile */
 @media (max-width: 768px) {
   .docs-sidebar { display: none !important; }
-  .docs-content { padding-left: 0 !important; border-left: none !important; }
+  .docs-content { padding-left: 0 !important; border-left: none !important; padding-top: 24px !important; }
+  .docs-back-link { display: flex !important; }
+  .grid-2col { grid-template-columns: 1fr; }
+  .grid-2col-gap64 { gap: 32px !important; }
+  .mobile-stack { flex-direction: column; }
 }

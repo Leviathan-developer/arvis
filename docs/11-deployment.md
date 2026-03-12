@@ -11,10 +11,10 @@ The fastest path to a working production deployment.
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/your-username/arvis-v3
-cd arvis-v3
+git clone https://github.com/Arvis-agent/arvis
+cd arvis
 cp .env.example .env
-nano .env     # Fill in your API keys
+nano .env     # Add bot tokens + API keys
 
 # 2. Start
 docker-compose up -d
@@ -62,17 +62,22 @@ node --version   # 18+
 ### Deploy
 
 ```bash
-git clone https://github.com/your-username/arvis-v3
-cd arvis-v3
+git clone https://github.com/Arvis-agent/arvis
+cd arvis
 npm install
 cp .env.example .env
-nano .env
+nano .env    # Add bot tokens + API keys
+
+# Optional: add Claude CLI subscription account
+npm install -g @anthropic-ai/claude-code
+npm run add-account
 
 # Build
 npm run build
 
 # Start
 npm start
+npm run dashboard
 ```
 
 ---
@@ -92,7 +97,7 @@ Type=simple
 User=arvis
 WorkingDirectory=/opt/arvis-v3
 EnvironmentFile=/opt/arvis-v3/.env
-ExecStart=/usr/bin/node node_modules/.bin/tsx src/cli.ts
+ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=10
 StandardOutput=journal

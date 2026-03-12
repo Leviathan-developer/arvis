@@ -21,6 +21,7 @@ export const DOCS_LIST = [
   { slug: '10-troubleshooting', num: '10', title: 'Troubleshooting',  tag: null, tagColor: null },
   { slug: '11-deployment',      num: '11', title: 'Deployment',       tag: 'VPS guide', tagColor: '#f59e0b' },
   { slug: '12-api-reference',   num: '12', title: 'API Reference',    tag: 'API', tagColor: '#22c55e' },
+  { slug: '13-first-agent-tutorial', num: '13', title: 'First Agent Tutorial', tag: 'Tutorial', tagColor: '#f59e0b' },
 ];
 
 export async function generateStaticParams() {
@@ -157,6 +158,23 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
             borderLeft: '1px solid #1a1a1f',
           }}
         >
+          {/* Mobile back-link (hidden on desktop, shown when sidebar is hidden) */}
+          <Link
+            href="/docs"
+            className="docs-back-link"
+            style={{
+              display: 'none',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 13,
+              color: '#8B5CF6',
+              textDecoration: 'none',
+              marginBottom: 20,
+              fontWeight: 500,
+            }}
+          >
+            ← Back to docs
+          </Link>
           <div className="prose" dangerouslySetInnerHTML={{ __html: html }} />
 
           {/* Prev / Next */}

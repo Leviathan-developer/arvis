@@ -45,11 +45,22 @@ export class ArvisDatabase {
             if (appliedNames.has(migration.name))
                 continue;
             log.info({ migration: migration.name }, 'Running migration');
-            this.transaction(() => {
-                migration.up(this);
-                this.run('INSERT INTO _migrations (name) VALUES (?)', migration.name);
-            });
-            count++;
+            try {
+                this.transaction(() => {
+                    migration.up(this);
+                    this.run('INSERT OR IGNORE INTO _migrations (name) VALUES (?)', migration.name);
+                });
+                count++;
+            }
+            catch (err) {
+                // If another process applied this migration concurrently, silently ignore
+                if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+                    log.debug({ migration: migration.name }, 'Migration already applied by another process');
+                }
+                else {
+                    throw err;
+                }
+            }
         }
         if (count > 0) {
             log.info({ count }, 'Migrations applied');

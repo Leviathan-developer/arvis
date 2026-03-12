@@ -301,11 +301,20 @@ export class TelegramConnector {
       }
     }
 
-    // Send files
+    // Send files — use appropriate method based on content type
     if (msg.files?.length) {
       for (const file of msg.files) {
         const buffer = typeof file.data === 'string' ? Buffer.from(file.data) : file.data;
-        await this.bot.api.sendDocument(chatId, new InputFile(buffer, file.name));
+        const ct = file.contentType || '';
+        if (ct.startsWith('image/')) {
+          await this.bot.api.sendPhoto(chatId, new InputFile(buffer, file.name));
+        } else if (ct.startsWith('audio/')) {
+          await this.bot.api.sendAudio(chatId, new InputFile(buffer, file.name));
+        } else if (ct.startsWith('video/')) {
+          await this.bot.api.sendVideo(chatId, new InputFile(buffer, file.name));
+        } else {
+          await this.bot.api.sendDocument(chatId, new InputFile(buffer, file.name));
+        }
       }
     }
   }

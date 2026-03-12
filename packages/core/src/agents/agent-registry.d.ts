@@ -13,6 +13,8 @@ export declare class AgentRegistry {
     update(slug: string, changes: Partial<AgentConfig>): Agent;
     /** Delete an agent and its channel bindings (cascade) */
     delete(slug: string): void;
+    /** Get agent by numeric ID, or null */
+    getById(id: number): Agent | null;
     /** Get agent by slug, or null */
     getBySlug(slug: string): Agent | null;
     /** Get agent bound to a specific channel, or null */

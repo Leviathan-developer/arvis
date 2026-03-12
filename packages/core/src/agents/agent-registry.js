@@ -16,7 +16,7 @@ export class AgentRegistry {
             throw new Error(`Failed to create agent: slug "${config.slug}" already exists`);
         }
         const result = this.db.run(`INSERT INTO agents (slug, name, role, description, model, model_primary, model_fallbacks, allowed_tools, project_path, system_prompt, personality, config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, config.slug, config.name, config.role, config.description ?? null, config.model ?? 'claude-sonnet-4-20250514', config.modelPrimary ?? null, config.modelFallbacks ? JSON.stringify(config.modelFallbacks) : null, config.allowedTools ? JSON.stringify(config.allowedTools) : null, config.projectPath ?? null, config.systemPrompt ?? null, config.personality ? JSON.stringify(config.personality) : null, null);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, config.slug, config.name, config.role, config.description ?? null, config.model ?? 'claude-sonnet-4-6', config.modelPrimary ?? null, config.modelFallbacks ? JSON.stringify(config.modelFallbacks) : null, config.allowedTools ? JSON.stringify(config.allowedTools) : null, config.projectPath ?? null, config.systemPrompt ?? null, config.personality ? JSON.stringify(config.personality) : null, null);
         const agentId = Number(result.lastInsertRowid);
         // Bind channels
         if (config.channels) {
@@ -102,6 +102,13 @@ export class AgentRegistry {
         }
         this.db.run('DELETE FROM agents WHERE slug = ?', slug);
         log.info({ slug }, 'Agent deleted');
+    }
+    /** Get agent by numeric ID, or null */
+    getById(id) {
+        const row = this.db.get('SELECT * FROM agents WHERE id = ?', id);
+        if (!row)
+            return null;
+        return this.hydrate(row);
     }
     /** Get agent by slug, or null */
     getBySlug(slug) {

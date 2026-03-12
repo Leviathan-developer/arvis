@@ -2,6 +2,15 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+export interface ChatAttachment {
+  filename: string;
+  contentType: string;
+  /** base64-encoded data */
+  data: string;
+  /** Preview URL for images (blob URL) */
+  previewUrl?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -11,6 +20,8 @@ export interface ChatMessage {
   isNew?: boolean;
   /** Delivery status for user messages */
   status?: 'sent' | 'delivered' | 'read';
+  /** File attachments */
+  attachments?: ChatAttachment[];
 }
 
 interface UseWebSocketOptions {
@@ -21,7 +32,7 @@ interface UseWebSocketOptions {
 
 interface UseWebSocketReturn {
   messages: ChatMessage[];
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string, attachments?: ChatAttachment[]) => void;
   stopGeneration: () => void;
   isConnected: boolean;
   isTyping: boolean;
@@ -52,6 +63,7 @@ export function useWebSocket({
   const reconnectAttempts = useRef(0);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const historyLoaded = useRef(false);
   const userCleared = useRef(false);   // user explicitly hit "Start fresh"
   const effectiveChannel = channelId || `dashboard-agent-${agentId}`;
@@ -59,16 +71,17 @@ export function useWebSocket({
   // Load history from DB — eagerly on mount, skip if user already cleared
   const loadHistory = useCallback(async () => {
     if (historyLoaded.current || userCleared.current) return;
-    historyLoaded.current = true;
     try {
       const res = await fetch(`/api/agents/${agentId}/history`);
       if (!res.ok) return;
       const data = await res.json() as { messages: ChatMessage[] };
+      historyLoaded.current = true;
       if (data.messages?.length) {
         setMessages(data.messages.map((m) => ({ ...m, isNew: false })));
       }
     } catch {
       // Silently ignore — chat still works without history
+      // Don't set historyLoaded so it can retry on reconnect
     }
   }, [agentId]);
 
@@ -83,7 +96,8 @@ export function useWebSocket({
     const host = process.env.NEXT_PUBLIC_CONNECTOR_WEB_HOST || 'localhost';
 
     try {
-      const ws = new WebSocket(`ws://${host}:${port}`);
+      const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${protocol}://${host}:${port}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -96,6 +110,13 @@ export function useWebSocket({
           userName,
           channelId: effectiveChannel,
         }));
+        // Keepalive ping every 30s to prevent silent connection death behind proxies
+        if (pingTimer.current) clearInterval(pingTimer.current);
+        pingTimer.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30_000);
       };
 
       ws.onmessage = (event) => {
@@ -105,6 +126,21 @@ export function useWebSocket({
 
           if (data.type === 'auth_ok') {
             setIsConnected(true);
+            return;
+          }
+
+          if (data.type === 'ack') {
+            // Server acknowledged receipt — upgrade message status
+            setMessages((prev) => {
+              const updated = [...prev];
+              for (let i = updated.length - 1; i >= 0; i--) {
+                if (updated[i].role === 'user' && updated[i].status === 'sent') {
+                  updated[i] = { ...updated[i], status: 'delivered' };
+                  break;
+                }
+              }
+              return updated;
+            });
             return;
           }
 
@@ -181,6 +217,7 @@ export function useWebSocket({
     return () => {
       if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
       if (typingTimer.current) clearTimeout(typingTimer.current);
+      if (pingTimer.current) clearInterval(pingTimer.current);
       if (wsRef.current) {
         detachHandlers(wsRef.current);
         wsRef.current.close();
@@ -189,7 +226,7 @@ export function useWebSocket({
     };
   }, [connect, loadHistory]);
 
-  const sendMessage = useCallback((content: string) => {
+  const sendMessage = useCallback((content: string, attachments?: ChatAttachment[]) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
     setMessages((prev) => [
@@ -200,11 +237,20 @@ export function useWebSocket({
         content,
         timestamp: new Date().toISOString(),
         isNew: true,
-        status: 'delivered', // connected = delivered to server
+        status: 'sent',
+        attachments,
       },
     ]);
 
-    wsRef.current.send(JSON.stringify({ type: 'message', content }));
+    const payload: Record<string, unknown> = { type: 'message', content };
+    if (attachments?.length) {
+      payload.attachments = attachments.map((a) => ({
+        filename: a.filename,
+        contentType: a.contentType,
+        data: a.data,
+      }));
+    }
+    wsRef.current.send(JSON.stringify(payload));
   }, []);
 
   const stopGeneration = useCallback(() => {

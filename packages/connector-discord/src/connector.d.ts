@@ -9,13 +9,16 @@ export declare class DiscordConnector {
     private bus;
     private config;
     private client;
+    private sendHandler;
+    private typingHandler;
     constructor(bus: MessageBus, config: {
         token: string;
         defaultAgentId?: number | null;
+        allowedChannels?: string[];
     });
     /** Start the Discord connector */
     start(): Promise<void>;
-    /** Stop the connector */
+    /** Stop the connector — remove all bus listeners before destroying client */
     stop(): Promise<void>;
     /** Convert Discord message to IncomingMessage */
     parseMessage(msg: DiscordMessage): IncomingMessage;

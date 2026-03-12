@@ -110,9 +110,11 @@ describe('Router', () => {
     expect(result!.role).toBe('conductor');
   });
 
-  it('returns null for unknown channel', () => {
+  it('falls back to conductor for unknown channel', () => {
     const result = router.route(makeMsg({ channelId: 'random-channel' }));
-    expect(result).toBeNull();
+    // Step 7: conductor fallback — bot is listening, user expects a reply
+    expect(result).not.toBeNull();
+    expect(result!.role).toBe('conductor');
   });
 
   it('owner can message any agent', () => {
@@ -135,7 +137,7 @@ describe('Router', () => {
     expect(router.canUserMessage('random-user', conductor)).toBe(true);
   });
 
-  it('does not route to paused agents via channel', () => {
+  it('does not route to paused agents via channel — falls back to conductor', () => {
     registry.create({
       slug: 'paused-agent',
       name: 'Paused',
@@ -146,7 +148,8 @@ describe('Router', () => {
     db.run("UPDATE agents SET status = 'paused' WHERE slug = ?", 'paused-agent');
 
     const result = router.route(makeMsg({ channelId: 'paused-ch' }));
-    // The channel binding still returns the agent, but status check filters it
-    expect(result).toBeNull();
+    // Paused agent is skipped, step 7 conductor fallback catches it
+    expect(result).not.toBeNull();
+    expect(result!.role).toBe('conductor');
   });
 });

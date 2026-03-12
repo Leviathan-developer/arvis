@@ -61,14 +61,16 @@ export class BillingManager {
     getClients() {
         return this.db.all('SELECT * FROM clients ORDER BY name').map(r => this.hydrateClient(r));
     }
-    /** Record a charge */
+    /** Record a charge (charge insert + balance update are atomic) */
     recordCharge(charge) {
-        const result = this.db.run(`INSERT INTO charges (client_id, agent_id, amount, type, description, conversation_id, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`, charge.clientId, charge.agentId ?? null, charge.amount, charge.type, charge.description, charge.conversationId ?? null, charge.metadata ? JSON.stringify(charge.metadata) : null);
-        // Update client balance
         const balanceChange = charge.type === 'payment' ? charge.amount : -charge.amount;
-        this.db.run('UPDATE clients SET balance = balance + ? WHERE id = ?', balanceChange, charge.clientId);
-        const id = Number(result.lastInsertRowid);
+        let id;
+        this.db.transaction(() => {
+            const result = this.db.run(`INSERT INTO charges (client_id, agent_id, amount, type, description, conversation_id, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`, charge.clientId, charge.agentId ?? null, charge.amount, charge.type, charge.description, charge.conversationId ?? null, charge.metadata ? JSON.stringify(charge.metadata) : null);
+            id = Number(result.lastInsertRowid);
+            this.db.run('UPDATE clients SET balance = balance + ? WHERE id = ?', balanceChange, charge.clientId);
+        });
         log.debug({ chargeId: id, clientId: charge.clientId, type: charge.type, amount: charge.amount }, 'Charge recorded');
         return this.getChargeById(id);
     }
@@ -98,9 +100,12 @@ export class BillingManager {
         if (!client)
             throw new Error(`Client ID ${clientId} not found`);
         const startDate = `${month}-01`;
-        const endDate = `${month}-31`;
-        const charges = this.db.all(`SELECT * FROM charges WHERE client_id = ? AND created_at >= ? AND created_at <= ?
-       ORDER BY created_at`, clientId, startDate, endDate);
+        const [year, monthNum] = month.split('-').map(Number);
+        const nextMonth = monthNum === 12
+            ? `${year + 1}-01-01`
+            : `${year}-${String(monthNum + 1).padStart(2, '0')}-01`;
+        const charges = this.db.all(`SELECT * FROM charges WHERE client_id = ? AND created_at >= ? AND created_at < ?
+       ORDER BY created_at`, clientId, startDate, nextMonth);
         const totalCharges = charges
             .filter(c => c.type !== 'payment')
             .reduce((sum, c) => sum + c.amount, 0);

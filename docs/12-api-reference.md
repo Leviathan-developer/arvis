@@ -458,6 +458,54 @@ Delete a webhook.
 
 ---
 
+## Variables & Secrets
+
+### `GET /api/variables`
+
+List all variables. Secret values are masked as `••••••••`.
+
+```json
+[
+  {
+    "id": 1,
+    "key": "GITHUB_TOKEN",
+    "value": "••••••••",
+    "description": "GitHub API token",
+    "is_secret": 1,
+    "created_at": "2025-03-01T12:00:00"
+  },
+  {
+    "id": 2,
+    "key": "WEBHOOK_URL",
+    "value": "https://hooks.example.com/abc",
+    "description": "Notification webhook",
+    "is_secret": 0,
+    "created_at": "2025-03-01T12:05:00"
+  }
+]
+```
+
+### `POST /api/variables`
+
+Create or update a variable (upserts by key).
+
+```json
+{
+  "key": "GITHUB_TOKEN",
+  "value": "ghp_xxxxxxxxxxxx",
+  "description": "GitHub API token for issue tracking",
+  "isSecret": true
+}
+```
+
+Key format: letters, numbers, underscores, hyphens, dots only.
+
+### `DELETE /api/variables?id=N`
+
+Delete a variable by ID.
+
+---
+
 ## Connectors
 
 ### `GET /api/connectors`

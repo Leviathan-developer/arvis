@@ -19,7 +19,7 @@ interface Session {
   user_id: string | null;
   status: string;
   message_count: number;
-  total_tokens_estimate: number;
+  total_token_estimate: number;
   created_at: string;
   updated_at: string;
   last_message: string | null;
@@ -29,7 +29,7 @@ interface Message {
   id: number;
   role: string;
   content: string;
-  tokens_estimate: number | null;
+  token_estimate: number | null;
   created_at: string;
 }
 
@@ -107,7 +107,7 @@ export default function SessionsPage() {
         started_at: session.created_at,
         last_message_at: session.updated_at,
         message_count: session.message_count,
-        total_tokens: session.total_tokens_estimate,
+        total_tokens: session.total_token_estimate,
       },
       messages: msgs,
     };
@@ -218,7 +218,7 @@ export default function SessionsPage() {
                       </div>
                       <span className="text-xs text-muted-foreground capitalize">{s.platform}</span>
                       <span className="font-mono text-xs text-muted-foreground tabular-nums text-right">{s.message_count.toLocaleString()}</span>
-                      <span className="font-mono text-xs text-muted-foreground tabular-nums text-right">{fmtTokens(s.total_tokens_estimate)}</span>
+                      <span className="font-mono text-xs text-muted-foreground tabular-nums text-right">{fmtTokens(s.total_token_estimate)}</span>
                       <div className="flex items-center gap-1.5">
                         <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', STATUS_DOT[s.status] ?? 'bg-muted-foreground/40')} />
                         <span className={cn('text-xs', STATUS_TEXT[s.status] ?? 'text-muted-foreground')}>{s.status}</span>
@@ -321,9 +321,9 @@ function MessageBubble({ message }: { message: Message }) {
           <span className="font-mono text-[10px] text-muted-foreground/40 tabular-nums">
             {formatRelative(message.created_at)}
           </span>
-          {message.tokens_estimate != null && message.tokens_estimate > 0 && (
+          {message.token_estimate != null && message.token_estimate > 0 && (
             <span className="font-mono text-[10px] text-muted-foreground/40 tabular-nums">
-              {message.tokens_estimate.toLocaleString()} tok
+              {message.token_estimate.toLocaleString()} tok
             </span>
           )}
         </div>

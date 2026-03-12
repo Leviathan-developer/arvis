@@ -59,8 +59,12 @@ export { SkillLoader } from './skills/skill-loader.js';
 export { SkillInjector } from './skills/skill-injector.js';
 export type { Skill } from './skills/types.js';
 
+// Variables
+export { VariableManager } from './variables/variable-manager.js';
+export type { Variable } from './variables/variable-manager.js';
+
 // Tools (built-in agent tools)
-export { ToolExecutor, getEnabledTools, getAllToolNames, registerTool, BUILT_IN_TOOLS, BUILT_IN_TOOL_NAMES } from './tools/tool-executor.js';
+export { ToolExecutor, getEnabledTools, getAllToolNames, registerTool, setVariableManager, BUILT_IN_TOOLS, BUILT_IN_TOOL_NAMES } from './tools/tool-executor.js';
 export type { ToolDefinition, ToolParam } from './tools/tool-executor.js';
 
 // Delegation
@@ -84,3 +88,4 @@ export { loadPlugins } from './plugins/plugin-loader.js';
 export { default as initialMigration } from './db/migrations/001-initial.js';
 export { default as multiProviderMigration } from './db/migrations/002-multi-provider.js';
 export { default as botInstancesMigration } from './db/migrations/003-bot-instances.js';
+export { default as variablesMigration } from './db/migrations/004-variables.js';

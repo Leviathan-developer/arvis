@@ -9,7 +9,7 @@ Arvis runs as **two separate Node.js processes** that share a SQLite database:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  PROCESS 1: Arvis Core  (node src/main.ts)                      │
+│  PROCESS 1: Arvis Core  (npm start)                               │
 │                                                                  │
 │  - The "brain" — handles all actual agent work                  │
 │  - Connects to Discord, Telegram, Slack, etc.                   │
@@ -24,7 +24,7 @@ Arvis runs as **two separate Node.js processes** that share a SQLite database:
                         │ data/arvis.db (SQLite, WAL mode)
                         │
 ┌─────────────────────────────────────────────────────────────────┐
-│  PROCESS 2: Dashboard  (next dev --port 5100)                   │
+│  PROCESS 2: Dashboard  (npm run dashboard)                      │
 │                                                                  │
 │  - The "eyes" — admin UI for monitoring and configuration       │
 │  - Next.js 15 app, imports @arvis/core to read DB directly      │
@@ -109,10 +109,9 @@ packages/core/src/
 │   ├── agent-runner.ts      ← RUNNER ORCHESTRATOR
 │   │   execute() → picks best account, handles failover
 │   │   3-stage: preferred → fallback chain → any account
-│   ├── cli-runner.ts        ← CLAUDE CLI SUBPROCESS
-│   │   Spawns: claude --print --continue (in conversation CWD)
-│   │   Prompt via stdin, response from stdout
-│   │   180s timeout
+│   ├── cli-runner.ts        ← CLAUDE CLI VIA AGENT SDK
+│   │   Uses @anthropic-ai/claude-agent-sdk query() function
+│   │   Stateless: Arvis manages all history, no session persistence
 │   ├── provider-runner.ts   ← DIRECT API RUNNER
 │   │   Supports: Anthropic, OpenAI, OpenRouter, Google, Ollama, custom
 │   │   Multi-turn tool loop (up to 5 tool calls per response)
@@ -189,10 +188,12 @@ data/
 ├── arvis.db          ← Main SQLite database (all state lives here)
 ├── arvis.db-shm      ← SQLite WAL shared memory (auto-managed)
 ├── arvis.db-wal      ← SQLite WAL journal (auto-managed)
+├── accounts/         ← CLI subscription accounts (created by `npm run add-account`)
+│   ├── acc1/         ← Account 1 (contains .claude/ auth files)
+│   ├── work/         ← Named account "work"
+│   └── ...           ← Auto-detected on startup
 ├── sessions/
-│   ├── 1/            ← Claude CLI working dir for conversation #1
-│   ├── 2/            ← Claude CLI working dir for conversation #2
-│   └── ...           ← One dir per conversation = no context bleed
+│   └── {convId}/     ← Per-conversation working dir for CLI runner
 └── backups/
     ├── arvis-2026-03-01.db
     └── arvis-2026-03-02.db  ← Daily backup, last 7 kept
@@ -207,18 +208,13 @@ data/
 ARVIS_DATA_DIR=./data         # Where DB and sessions live
 
 # LLM — at least one required
-CLAUDE_CLI_HOME=~/.claude     # CLI subscription (Max plan)
+# CLI subscriptions: auto-detected from data/accounts/ (use `npm run add-account`)
+# API keys (add _1 _2 ... _50 for multiple):
 ANTHROPIC_API_KEY=sk-ant-...  # Direct Anthropic API
 OPENAI_API_KEY=sk-...
 OPENROUTER_API_KEY=sk-or-...
 GOOGLE_API_KEY=AIza...
 OLLAMA_BASE_URL=http://localhost:11434
-
-# Multiple accounts (add _1 _2 ... _50)
-ANTHROPIC_API_KEY_1=sk-ant-...
-ANTHROPIC_API_KEY_2=sk-ant-...
-CLAUDE_CLI_HOME_1=~/.claude-work
-CLAUDE_CLI_HOME_2=~/.claude-personal
 
 # Platform bots
 DISCORD_TOKEN=...

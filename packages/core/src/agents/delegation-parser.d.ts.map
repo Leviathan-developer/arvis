@@ -1,0 +1,1 @@
+{"version":3,"file":"delegation-parser.d.ts","sourceRoot":"","sources":["delegation-parser.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;GAcG;AAEH,MAAM,WAAW,iBAAiB;IAChC,SAAS,EAAE,MAAM,CAAC;IAClB,IAAI,EAAE,MAAM,CAAC;CACd;AAKD,6DAA6D;AAC7D,wBAAgB,gBAAgB,CAAC,IAAI,EAAE,MAAM,GAAG,iBAAiB,EAAE,CAgBlE;AAED,2DAA2D;AAC3D,wBAAgB,gBAAgB,CAAC,IAAI,EAAE,MAAM,GAAG,MAAM,CAKrD"}

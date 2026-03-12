@@ -71,6 +71,11 @@ export class WebhookServer {
             payload = body;
         }
         // Build prompt from template
+        if (!webhook.prompt_template) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Webhook has no prompt template configured' }));
+            return;
+        }
         const prompt = webhook.prompt_template.replace('{{payload}}', JSON.stringify(payload));
         // Enqueue
         this.queue.enqueue({

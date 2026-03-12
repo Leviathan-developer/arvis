@@ -6,10 +6,11 @@
 ## Quick Debug Checklist
 
 ```
-□ Is Arvis core running? → Check terminal for errors
-□ Is dashboard running? → Open http://localhost:5100
-□ Database exists? → ls data/*.db
-□ At least one LLM account configured? → Dashboard → Settings → Accounts
+□ Is Arvis core running? → Run `npm start` and check for errors
+□ Is dashboard running? → Run `npm run dashboard`, open http://localhost:5100
+□ Database exists? → ls data/arvis.db
+□ At least one LLM account? → `npm run add-account` or add API key to .env
+□ Accounts showing in dashboard? → Settings → Accounts (restart core if 0)
 □ Bot tokens valid? → Dashboard → Channels → check status
 □ Agent enabled? → Dashboard → Agents → check status badge
 □ Check logs → Dashboard → Logs page (or terminal output)
@@ -81,6 +82,18 @@ Different users' conversations are bleeding into each other.
 **Fix:** Per-conversation CWD is implemented in `arvis.ts` — each conversation gets `data/sessions/{conversationId}/`. If this is happening, verify that:
 1. The conversation is stored correctly (each user/channel combo has unique `conversationId`)
 2. `data/sessions/` directory exists and has subdirectories per conversation
+
+---
+
+### Dashboard Shows 0 Accounts
+
+**Cause:** Core hasn't synced accounts to the database yet, or dashboard started before core.
+
+**Fix:**
+1. Start the core first (`npm start`) — it syncs accounts on startup
+2. Then start dashboard (`npm run dashboard`)
+3. If using CLI accounts, verify they exist: `ls data/accounts/` — each should have a `.claude/` subfolder
+4. If using API keys, verify `.env` has at least one key set
 
 ---
 

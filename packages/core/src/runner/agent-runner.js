@@ -99,7 +99,7 @@ export class AgentRunner {
             };
             // Success — clear any rate limit on this account
             this.accountManager.clearRateLimit(account.id);
-            this.accountManager.recordUsage(account.id, fullResult.tokensUsed);
+            this.accountManager.recordUsage(account.id);
             // Record cost if there's an agent
             this.accountManager.recordCost(account.id, fullResult.inputTokens, fullResult.outputTokens, fullResult.model, account.provider, request.agent.id);
             log.info({
@@ -149,7 +149,7 @@ export class AgentRunner {
             outputTokens: result.outputTokens || 0,
             costUsd: result.costUsd || 0,
         };
-        this.accountManager.recordUsage(account.id, fullResult.tokensUsed);
+        this.accountManager.recordUsage(account.id);
         return fullResult;
     }
 }

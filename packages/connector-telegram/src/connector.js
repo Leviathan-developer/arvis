@@ -6,7 +6,7 @@ async function transcribeAudio(buf, filename) {
         return null;
     try {
         const form = new FormData();
-        form.append('file', new Blob([buf]), filename);
+        form.append('file', new Blob([new Uint8Array(buf)]), filename);
         form.append('model', 'whisper-1');
         const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
             method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form,
@@ -29,6 +29,8 @@ export class TelegramConnector {
     bus;
     config;
     bot;
+    sendHandler = null;
+    typingHandler = null;
     constructor(bus, config) {
         this.bus = bus;
         this.config = config;
@@ -131,23 +133,38 @@ export class TelegramConnector {
             });
             ctx.answerCallbackQuery().catch(() => { });
         });
-        // Outgoing messages
-        this.bus.on('send', async (msg) => {
+        // Outgoing messages — store ref so we can remove it on stop()
+        this.sendHandler = async (msg) => {
             if (msg.platform !== 'telegram')
                 return;
-            await this.sendToTelegram(msg);
-        });
-        // Typing indicator
-        this.bus.on('typing', (data) => {
+            try {
+                await this.sendToTelegram(msg);
+            }
+            catch (err) {
+                console.error('[telegram] send failed:', err instanceof Error ? err.message : err);
+            }
+        };
+        this.bus.on('send', this.sendHandler);
+        // Typing indicator — store ref so we can remove it on stop()
+        this.typingHandler = (data) => {
             if (data.platform !== 'telegram')
                 return;
             this.bot.api.sendChatAction(data.channelId, 'typing').catch(() => { });
-        });
+        };
+        this.bus.on('typing', this.typingHandler);
         // Start polling
         this.bot.start();
     }
-    /** Stop the connector */
+    /** Stop the connector — remove bus listeners before stopping bot */
     async stop() {
+        if (this.sendHandler) {
+            this.bus.off('send', this.sendHandler);
+            this.sendHandler = null;
+        }
+        if (this.typingHandler) {
+            this.bus.off('typing', this.typingHandler);
+            this.typingHandler = null;
+        }
         this.bot.stop();
     }
     /** Convert a grammy Context to an IncomingMessage */

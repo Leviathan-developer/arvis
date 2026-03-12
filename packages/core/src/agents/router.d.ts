@@ -11,16 +11,22 @@ export declare class Router {
     private registry;
     private bus;
     private config;
+    /** Cached mention RegExp patterns keyed by agent name — avoids recompiling on every message */
+    private mentionPatterns;
     constructor(registry: AgentRegistry, bus: MessageBus, config: ArvisConfig);
     /**
      * Determines which agent should handle this message.
      *
      * Logic:
+     * 0. Bot has assigned agent (bot_instances.agent_id) -> route there (active only)
      * 1. Channel is bound to an agent -> route there
      * 2. Message mentions an agent by name -> route there
      * 3. Message is in conductor channel -> route to conductor
-     * 4. Message is a DM (channelId starts with "dm-") -> route to conductor
-     * 5. No match -> return null (ignore)
+     * 4. Dashboard direct channel (dashboard-agent-{id}) -> route to that agent
+     * 5. Message is a DM (channelId starts with "dm-") -> route to conductor
+     * 6. Bot has assigned agent but inactive at step 0 -> route there anyway
+     * 7. Fall back to conductor (bot is in this channel, user expects a reply)
+     * 8. No match -> return null (ignore)
      */
     route(msg: IncomingMessage): Agent | null;
     /**

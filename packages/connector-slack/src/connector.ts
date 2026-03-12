@@ -217,6 +217,18 @@ export class SlackConnector {
     }
 
     await this.app.client.chat.postMessage(payload as unknown as Parameters<typeof this.app.client.chat.postMessage>[0]);
+
+    // Upload files after posting the message
+    if (msg.files?.length) {
+      for (const file of msg.files) {
+        const buffer = typeof file.data === 'string' ? Buffer.from(file.data) : file.data;
+        await this.app.client.filesUploadV2({
+          channel_id: msg.channelId,
+          file: buffer,
+          filename: file.name,
+        } as Parameters<typeof this.app.client.filesUploadV2>[0]);
+      }
+    }
   }
 
   private tryParseJson(str: string | undefined): Record<string, unknown> | undefined {
